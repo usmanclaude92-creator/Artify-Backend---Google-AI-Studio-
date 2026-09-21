@@ -48,6 +48,7 @@ import invoiceRoutes from "./invoiceRoutes";
 import paymentRoutes from "./paymentRoutes";
 import portalRoutes from "./portalRoutes";
 import publicRoutes from "./publicRoutes";
+import aiRoutes from "./aiRoutes";
 
 const v1Router = Router();
 
@@ -81,5 +82,6 @@ v1Router.use("/invoices", invoiceRoutes);
 v1Router.use("/payments", paymentRoutes);
 v1Router.use("/portal", portalRoutes);
 v1Router.use("/public", publicRoutes);
+v1Router.use("/ai", aiRoutes);
 
 export default v1Router;

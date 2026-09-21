@@ -62,6 +62,8 @@ import { SubscriptionsPage } from "../components/modules/SubscriptionsPage";
 import { InvoicesPage } from "../components/modules/InvoicesPage";
 import { PaymentsPage } from "../components/modules/PaymentsPage";
 import { ClientPortalPage } from "../components/modules/ClientPortalPage";
+import { AiControlCenterPage } from "../components/modules/AiControlCenterPage";
+import { Sparkles } from "lucide-react";
 
 export function hasPermission(permissions: readonly string[] | undefined, key: string): boolean {
   return !!permissions?.includes(key);
@@ -76,7 +78,7 @@ export interface NavItem {
   requiresAnyPermission?: string[];
   component: ComponentType;
   /** Groups items under a heading in the sidebar (§22/§31) — purely presentational. */
-  section: "Platform" | "CRM" | "Onboarding" | "Workspaces" | "Products" | "CMS" | "Commercial" | "Client Portal";
+  section: "Platform" | "AI Control Center" | "CRM" | "Onboarding" | "Workspaces" | "Products" | "CMS" | "Commercial" | "Client Portal";
 }
 
 /**
@@ -88,6 +90,15 @@ export interface NavItem {
  */
 export const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, component: DashboardPage, section: "Platform" },
+  {
+    id: "ai-control-center",
+    label: "AI Control Center",
+    path: "/ai",
+    icon: Sparkles,
+    requiresAnyPermission: ["ai.read"],
+    component: AiControlCenterPage,
+    section: "AI Control Center",
+  },
   {
     id: "users",
     label: "Users",

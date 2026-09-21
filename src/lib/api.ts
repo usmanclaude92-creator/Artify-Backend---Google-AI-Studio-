@@ -1165,3 +1165,316 @@ export const portalApi = {
   invoice: (id: string) => apiClient.get<{ invoice: Invoice }>(`/portal/invoices/${id}`),
   payments: (params: { page?: number; limit?: number } = {}) => paginatedGet<Payment>("/portal/payments", "payments", params),
 };
+
+// =============================================================================
+// AI Control Center (Phase 12)
+// =============================================================================
+
+export interface AiCapability {
+  id: string;
+  name: string;
+  category: "GENERATION" | "ANALYSIS" | "AUTOMATION" | "TRANSFORMATION";
+  description: string;
+  recommendedModelType: string;
+  supportsStreaming: boolean;
+  requiresVision?: boolean;
+  requiresTools?: boolean;
+}
+
+export interface AiProvider {
+  id: string;
+  organizationId: string;
+  name: string;
+  providerType: "GEMINI" | "OPENAI" | "ANTHROPIC" | "MOCK" | "CUSTOM";
+  baseUrl?: string | null;
+  credentialRef?: string | null;
+  status: "ACTIVE" | "INACTIVE" | "ERROR" | "RATE_LIMITED";
+  isDefault: boolean;
+  supportedCapabilities: string[];
+  configuration: Record<string, unknown>;
+  models?: AiModel[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiModel {
+  id: string;
+  providerId: string;
+  modelName: string;
+  displayName: string;
+  modelType: "CHAT" | "COMPLETION" | "EMBEDDING" | "MULTIMODAL";
+  contextLimit: number;
+  inputCapabilities: string[];
+  outputCapabilities: string[];
+  supportsTools: boolean;
+  supportsVision: boolean;
+  supportsEmbedding: boolean;
+  status: "ACTIVE" | "DEPRECATED" | "DISABLED";
+  isDefault: boolean;
+  configMetadata: Record<string, unknown>;
+  provider?: AiProvider;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAgent {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  purpose?: string | null;
+  status: "ACTIVE" | "DRAFT" | "ARCHIVED" | "SUSPENDED";
+  systemInstructions: string;
+  modelId?: string | null;
+  configuration: Record<string, unknown>;
+  allowedTools: string[];
+  allowedCapabilities: string[];
+  knowledgeSources: string[];
+  maxExecutionTime: number;
+  maxTokenLimit: number;
+  retryPolicy: Record<string, unknown>;
+  requireApproval: boolean;
+  version: number;
+  createdById: string;
+  updatedById: string;
+  model?: AiModel | null;
+  createdBy?: SanitizedUser | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAgentVersion {
+  id: string;
+  agentId: string;
+  version: number;
+  systemInstructions: string;
+  configuration: Record<string, unknown>;
+  allowedTools: string[];
+  createdById: string;
+  changeNote?: string | null;
+  createdAt: string;
+}
+
+export interface AiPrompt {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  category: string;
+  systemPrompt?: string | null;
+  template: string;
+  variables: string[];
+  outputFormat: "TEXT" | "JSON" | "MARKDOWN" | "STRUCTURED";
+  version: number;
+  status: "ACTIVE" | "DRAFT" | "ARCHIVED";
+  isActiveVersion: boolean;
+  createdById: string;
+  updatedById: string;
+  createdBy?: SanitizedUser | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiPromptVersion {
+  id: string;
+  promptId: string;
+  version: number;
+  template: string;
+  systemPrompt?: string | null;
+  variables: string[];
+  createdById: string;
+  changeNote?: string | null;
+  createdAt: string;
+}
+
+export interface AiTool {
+  name: string;
+  displayName: string;
+  description: string;
+  requiredPermission: string;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  requiresApproval: boolean;
+  requiresAudit: boolean;
+  parameters: {
+    type: "object";
+    properties: Record<string, { type: string; description: string }>;
+    required?: string[];
+  };
+}
+
+export interface AiWorkflow {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string | null;
+  trigger: "MANUAL" | "EVENT" | "SCHEDULE" | "WEBHOOK";
+  steps: Array<Record<string, unknown>>;
+  conditions: Record<string, unknown>;
+  agentId?: string | null;
+  tools: string[];
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  requireApproval: boolean;
+  retryPolicy: Record<string, unknown>;
+  timeout: number;
+  status: "ACTIVE" | "DRAFT" | "DISABLED" | "ARCHIVED";
+  version: number;
+  agent?: AiAgent | null;
+  createdBy?: SanitizedUser | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiApproval {
+  id: string;
+  organizationId: string;
+  agentId?: string | null;
+  workflowId?: string | null;
+  executionId?: string | null;
+  requesterId: string;
+  approverId?: string | null;
+  action: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  payload: Record<string, unknown>;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+  decisionReason?: string | null;
+  requestedAt: string;
+  decidedAt?: string | null;
+  expiresAt?: string | null;
+  approver?: SanitizedUser | null;
+}
+
+export interface AiExecution {
+  id: string;
+  organizationId: string;
+  agentId?: string | null;
+  workflowId?: string | null;
+  providerId?: string | null;
+  modelId?: string | null;
+  capability: string;
+  status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "PENDING_APPROVAL" | "CANCELLED";
+  startedAt: string;
+  completedAt?: string | null;
+  durationMs?: number | null;
+  inputMetadata: Record<string, unknown>;
+  outputMetadata?: Record<string, unknown> | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  errorMessage?: string | null;
+  approvalStatus?: string | null;
+  initiatorUserId?: string | null;
+  trigger: "MANUAL" | "WORKFLOW" | "AGENT" | "CRON" | "EVENT";
+  agent?: AiAgent | null;
+  model?: AiModel | null;
+  workflow?: AiWorkflow | null;
+}
+
+export interface AiDashboardStats {
+  totalExecutions: number;
+  successfulExecutions: number;
+  failedExecutions: number;
+  successRate: number;
+  pendingApprovals: number;
+  activeAgents: number;
+  activeWorkflows: number;
+  activeModels: number;
+  activeProviders: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCost: number;
+  averageDurationMs: number;
+  breakdownByCapability: Record<string, number>;
+  breakdownByModel: Record<string, number>;
+  recentExecutions: AiExecution[];
+  recentFailures: AiExecution[];
+}
+
+export const aiApi = {
+  dashboard: () => apiClient.get<{ stats: AiDashboardStats }>("/ai/dashboard"),
+  capabilities: () => apiClient.get<{ capabilities: AiCapability[] }>("/ai/capabilities"),
+
+  // Providers
+  listProviders: () => apiClient.get<{ providers: AiProvider[] }>("/ai/providers"),
+  getProvider: (id: string) => apiClient.get<{ provider: AiProvider }>(`/ai/providers/${id}`),
+  createProvider: (payload: Partial<AiProvider>) => apiClient.post<{ provider: AiProvider }>("/ai/providers", payload),
+  updateProvider: (id: string, payload: Partial<AiProvider>) => apiClient.patch<{ provider: AiProvider }>(`/ai/providers/${id}`, payload),
+  deleteProvider: (id: string) => apiClient.delete<{ message: string }>(`/ai/providers/${id}`),
+  testProvider: (id: string) => apiClient.post<{ result: { success: boolean; durationMs: number; responseSample: string } }>(`/ai/providers/${id}/test`, {}),
+
+  // Models
+  listModels: (providerId?: string) => apiClient.get<{ models: AiModel[] }>(`/ai/models${providerId ? `?providerId=${providerId}` : ""}`),
+  getModel: (id: string) => apiClient.get<{ model: AiModel }>(`/ai/models/${id}`),
+  createModel: (payload: Partial<AiModel>) => apiClient.post<{ model: AiModel }>("/ai/models", payload),
+  updateModel: (id: string, payload: Partial<AiModel>) => apiClient.patch<{ model: AiModel }>(`/ai/models/${id}`, payload),
+
+  // Agents
+  listAgents: (params: { page?: number; limit?: number; search?: string; status?: string } = {}) =>
+    paginatedGet<AiAgent>("/ai/agents", "agents", params),
+  getAgent: (id: string) => apiClient.get<{ agent: AiAgent }>(`/ai/agents/${id}`),
+  listAgentVersions: (id: string) => apiClient.get<{ versions: AiAgentVersion[] }>(`/ai/agents/${id}/versions`),
+  createAgent: (payload: Partial<AiAgent>) => apiClient.post<{ agent: AiAgent }>("/ai/agents", payload),
+  updateAgent: (id: string, payload: Partial<AiAgent> & { changeNote?: string }) =>
+    apiClient.patch<{ agent: AiAgent }>(`/ai/agents/${id}`, payload),
+
+  // Prompts
+  listPrompts: (params: { page?: number; limit?: number; search?: string; status?: string } = {}) =>
+    paginatedGet<AiPrompt>("/ai/prompts", "prompts", params),
+  getPrompt: (id: string) => apiClient.get<{ prompt: AiPrompt }>(`/ai/prompts/${id}`),
+  listPromptVersions: (id: string) => apiClient.get<{ versions: AiPromptVersion[] }>(`/ai/prompts/${id}/versions`),
+  createPrompt: (payload: Partial<AiPrompt>) => apiClient.post<{ prompt: AiPrompt }>("/ai/prompts", payload),
+  updatePrompt: (id: string, payload: Partial<AiPrompt> & { changeNote?: string }) =>
+    apiClient.patch<{ prompt: AiPrompt }>(`/ai/prompts/${id}`, payload),
+
+  // Tools
+  listTools: () => apiClient.get<{ tools: AiTool[] }>("/ai/tools"),
+  executeTool: (toolName: string, args: Record<string, unknown>) =>
+    apiClient.post<{ result: unknown }>("/ai/tools/execute", { toolName, args }),
+
+  // Workflows
+  listWorkflows: (params: { page?: number; limit?: number; search?: string; status?: string } = {}) =>
+    paginatedGet<AiWorkflow>("/ai/workflows", "workflows", params),
+  getWorkflow: (id: string) => apiClient.get<{ workflow: AiWorkflow }>(`/ai/workflows/${id}`),
+  createWorkflow: (payload: Partial<AiWorkflow>) => apiClient.post<{ workflow: AiWorkflow }>("/ai/workflows", payload),
+  updateWorkflow: (id: string, payload: Partial<AiWorkflow>) => apiClient.patch<{ workflow: AiWorkflow }>(`/ai/workflows/${id}`, payload),
+  executeWorkflow: (id: string, input: Record<string, unknown> = {}) =>
+    apiClient.post<{ result: unknown }>(`/ai/workflows/${id}/execute`, { input }),
+
+  // Approvals
+  listApprovals: (params: { page?: number; limit?: number; status?: string } = {}) =>
+    paginatedGet<AiApproval>("/ai/approvals", "approvals", params),
+  getApproval: (id: string) => apiClient.get<{ approval: AiApproval }>(`/ai/approvals/${id}`),
+  decideApproval: (id: string, decision: "APPROVED" | "REJECTED", reason?: string) =>
+    apiClient.post<{ approval: AiApproval; executionResult?: unknown }>(`/ai/approvals/${id}/decide`, { decision, reason }),
+
+  // Executions
+  listExecutions: (params: { page?: number; limit?: number; status?: string; capability?: string; agentId?: string } = {}) =>
+    paginatedGet<AiExecution>("/ai/executions", "executions", params),
+  getExecution: (id: string) => apiClient.get<{ execution: AiExecution }>(`/ai/executions/${id}`),
+  execute: (payload: {
+    prompt: string;
+    capability?: string;
+    agentId?: string;
+    modelId?: string;
+    providerId?: string;
+    systemInstruction?: string;
+    variables?: Record<string, string>;
+    temperature?: number;
+    maxTokens?: number;
+  }) => apiClient.post<{ result: {
+    executionId: string;
+    status: string;
+    output: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    durationMs: number;
+    estimatedCost: number;
+    approvalId?: string;
+    requiresApproval?: boolean;
+  } }>("/ai/execute", payload),
+};
+

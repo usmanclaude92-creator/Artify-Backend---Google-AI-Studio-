@@ -269,7 +269,22 @@ export function validateEnv(raw: NodeJS.ProcessEnv | Record<string, string | und
 }
 
 function loadConfig(): AppConfig {
-  const result = validateEnv(process.env);
+  const rawEnv: Record<string, string | undefined> = { ...process.env };
+  const isProdLike = rawEnv.NODE_ENV === "production" || rawEnv.NODE_ENV === "staging";
+
+  // Provide safe defaults for local development/sandbox environments if unset
+  if (!isProdLike) {
+    if (!rawEnv.SESSION_SECRET) {
+      rawEnv.SESSION_SECRET = "artify_dev_session_secret_32_chars_long_minimum!";
+      process.env.SESSION_SECRET = rawEnv.SESSION_SECRET;
+    }
+    if (!rawEnv.WEBHOOK_SECRET) {
+      rawEnv.WEBHOOK_SECRET = "artify_dev_webhook_secret_32_chars_long_minimum!";
+      process.env.WEBHOOK_SECRET = rawEnv.WEBHOOK_SECRET;
+    }
+  }
+
+  const result = validateEnv(rawEnv);
 
   if (!result.success) {
     console.error("FATAL: invalid environment configuration. Refusing to start.\n");

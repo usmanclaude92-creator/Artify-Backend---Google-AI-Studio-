@@ -95,6 +95,13 @@ model Organization {
   systemSettings       SystemSetting[]
   onboardings          ClientOnboarding[]
   invitations          WorkspaceInvitation[]
+  // Phase 12 — AI Control Center
+  aiProviders          AiProvider[]
+  aiAgents             AiAgent[]
+  aiPrompts            AiPrompt[]
+  aiWorkflows          AiWorkflow[]
+  aiApprovals          AiApproval[]
+  aiExecutions         AiExecution[]
   // The operational tenant a CRM Client was provisioned into (Phase 6 —
   // docs/WORKSPACE_PROVISIONING.md). Reverse side of Client.workspaceOrganizationId.
   provisionedForClient Client?                  @relation("ClientWorkspace")
@@ -167,6 +174,14 @@ model User {
   createdInvoices           Invoice[]                @relation("InvoiceCreatedBy")
   createdPayments           Payment[]                @relation("PaymentCreatedBy")
   reversedPayments          Payment[]                @relation("PaymentReversedBy")
+  // Phase 12 — AI Control Center
+  createdAiAgents           AiAgent[]                @relation("AgentCreatedBy")
+  updatedAiAgents           AiAgent[]                @relation("AgentUpdatedBy")
+  createdAiPrompts          AiPrompt[]               @relation("PromptCreatedBy")
+  updatedAiPrompts          AiPrompt[]               @relation("PromptUpdatedBy")
+  createdAiWorkflows        AiWorkflow[]             @relation("WorkflowCreatedBy")
+  updatedAiWorkflows        AiWorkflow[]             @relation("WorkflowUpdatedBy")
+  decidedAiApprovals        AiApproval[]             @relation("ApprovalDecidedBy")
 
   @@index([organizationId])
   @@map("users")
@@ -1346,3 +1361,353 @@ model SystemSetting {
   @@unique([organizationId, key])
   @@map("system_settings")
 }
+
+// =============================================================================
+// AI CONTROL CENTER (Phase 12)
+// =============================================================================
+
+enum AiProviderType {
+  GEMINI
+  OPENAI
+  ANTHROPIC
+  CUSTOM
+  MOCK
+}
+
+enum AiProviderStatus {
+  ACTIVE
+  INACTIVE
+  DEPRECATED
+}
+
+enum AiModelType {
+  CHAT
+  COMPLETION
+  EMBEDDING
+  MULTIMODAL
+}
+
+enum AiModelStatus {
+  ACTIVE
+  INACTIVE
+  DEPRECATED
+}
+
+enum AiAgentStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum AiPromptStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum AiToolStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum AiRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AiWorkflowTrigger {
+  MANUAL
+  SCHEDULED
+  EVENT
+  WEBHOOK
+}
+
+enum AiWorkflowStatus {
+  ACTIVE
+  DRAFT
+  PAUSED
+  ARCHIVED
+}
+
+enum AiApprovalStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum AiExecutionStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  WAITING_APPROVAL
+  REJECTED
+}
+
+model AiProvider {
+  id                    String           @id @default(uuid())
+  organizationId        String           @map("organization_id")
+  name                  String
+  providerType          AiProviderType   @default(GEMINI) @map("provider_type")
+  baseUrl               String?          @map("base_url")
+  credentialRef         String?          @map("credential_ref")
+  status                AiProviderStatus @default(ACTIVE)
+  isDefault             Boolean          @default(false) @map("is_default")
+  supportedCapabilities Json             @default("[]") @map("supported_capabilities")
+  configuration         Json             @default("{}")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  models       AiModel[]
+  executions   AiExecution[]
+
+  @@index([organizationId])
+  @@map("ai_providers")
+}
+
+model AiModel {
+  id                 String        @id @default(uuid())
+  providerId         String        @map("provider_id")
+  modelName          String        @map("model_name")
+  displayName        String        @map("display_name")
+  modelType          AiModelType   @default(CHAT) @map("model_type")
+  contextLimit       Int           @default(128000) @map("context_limit")
+  inputCapabilities  Json          @default("[\"TEXT\"]") @map("input_capabilities")
+  outputCapabilities Json          @default("[\"TEXT\"]") @map("output_capabilities")
+  supportsTools      Boolean       @default(true) @map("supports_tools")
+  supportsVision     Boolean       @default(false) @map("supports_vision")
+  supportsEmbedding  Boolean       @default(false) @map("supports_embedding")
+  status             AiModelStatus @default(ACTIVE)
+  isDefault          Boolean       @default(false) @map("is_default")
+  configMetadata     Json          @default("{}") @map("config_metadata")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  provider   AiProvider    @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  agents     AiAgent[]
+  executions AiExecution[]
+
+  @@unique([providerId, modelName])
+  @@index([providerId])
+  @@map("ai_models")
+}
+
+model AiAgent {
+  id                  String        @id @default(uuid())
+  organizationId      String        @map("organization_id")
+  name                String
+  description         String?
+  purpose             String
+  status              AiAgentStatus @default(ACTIVE)
+  systemInstructions  String        @map("system_instructions") @db.Text
+  modelId             String        @map("model_id")
+  configuration       Json          @default("{\"temperature\":0.3,\"maxTokens\":2048}")
+  allowedTools        Json          @default("[]") @map("allowed_tools")
+  allowedCapabilities Json          @default("[]") @map("allowed_capabilities")
+  knowledgeSources    Json          @default("[]") @map("knowledge_sources")
+  maxExecutionTime    Int           @default(30) @map("max_execution_time")
+  maxTokenLimit       Int           @default(4096) @map("max_token_limit")
+  retryPolicy         Json          @default("{\"maxRetries\":2,\"backoffMs\":500}") @map("retry_policy")
+  requireApproval     Boolean       @default(false) @map("require_approval")
+  version             Int           @default(1)
+  createdById         String?       @map("created_by_id")
+  updatedById         String?       @map("updated_by_id")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  model        AiModel          @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  createdBy    User?            @relation("AgentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy    User?            @relation("AgentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  versions     AiAgentVersion[]
+  executions   AiExecution[]
+  workflows    AiWorkflow[]
+
+  @@index([organizationId])
+  @@map("ai_agents")
+}
+
+model AiAgentVersion {
+  id                  String   @id @default(uuid())
+  agentId             String   @map("agent_id")
+  version             Int
+  name                String
+  systemInstructions  String   @map("system_instructions") @db.Text
+  modelId             String   @map("model_id")
+  configuration       Json
+  allowedTools        Json     @map("allowed_tools")
+  allowedCapabilities Json     @map("allowed_capabilities")
+  createdById         String?  @map("created_by_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  agent AiAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, version])
+  @@index([agentId])
+  @@map("ai_agent_versions")
+}
+
+model AiPrompt {
+  id              String         @id @default(uuid())
+  organizationId  String         @map("organization_id")
+  name            String
+  description     String?
+  category        String         @default("GENERAL")
+  systemPrompt    String?        @map("system_prompt") @db.Text
+  template        String         @db.Text
+  variables       Json           @default("[]")
+  outputFormat    String         @default("TEXT") @map("output_format")
+  version         Int            @default(1)
+  status          AiPromptStatus @default(ACTIVE)
+  isActiveVersion Boolean        @default(true) @map("is_active_version")
+  createdById     String?        @map("created_by_id")
+  updatedById     String?        @map("updated_by_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy    User?             @relation("PromptCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy    User?             @relation("PromptUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  versions     AiPromptVersion[]
+
+  @@index([organizationId])
+  @@map("ai_prompts")
+}
+
+model AiPromptVersion {
+  id           String   @id @default(uuid())
+  promptId     String   @map("prompt_id")
+  version      Int
+  systemPrompt String?  @map("system_prompt") @db.Text
+  template     String   @db.Text
+  variables    Json
+  outputFormat String   @map("output_format")
+  createdById  String?  @map("created_by_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  prompt AiPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@unique([promptId, version])
+  @@index([promptId])
+  @@map("ai_prompt_versions")
+}
+
+model AiTool {
+  id               String       @id @default(uuid())
+  name             String       @unique
+  displayName      String       @map("display_name")
+  description      String
+  inputSchema      Json         @map("input_schema")
+  outputSchema     Json         @map("output_schema")
+  permission       String
+  status           AiToolStatus @default(ACTIVE)
+  riskLevel        AiRiskLevel  @default(LOW) @map("risk_level")
+  requiresApproval Boolean      @default(false) @map("requires_approval")
+  requiresAudit    Boolean      @default(true) @map("requires_audit")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  @@map("ai_tools")
+}
+
+model AiWorkflow {
+  id              String            @id @default(uuid())
+  organizationId  String            @map("organization_id")
+  name            String
+  description     String?
+  trigger         AiWorkflowTrigger @default(MANUAL)
+  steps           Json              @default("[]")
+  conditions      Json              @default("{}")
+  agentId         String?           @map("agent_id")
+  tools           Json              @default("[]")
+  inputSchema     Json              @default("{}") @map("input_schema")
+  outputSchema    Json              @default("{}") @map("output_schema")
+  requireApproval Boolean           @default(false) @map("require_approval")
+  retryPolicy     Json              @default("{\"maxRetries\":1,\"backoffMs\":1000}") @map("retry_policy")
+  timeout         Int               @default(60)
+  status          AiWorkflowStatus  @default(ACTIVE)
+  version         Int               @default(1)
+  createdById     String?           @map("created_by_id")
+  updatedById     String?           @map("updated_by_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  agent        AiAgent?      @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  createdBy    User?         @relation("WorkflowCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy    User?         @relation("WorkflowUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  executions   AiExecution[]
+
+  @@index([organizationId])
+  @@map("ai_workflows")
+}
+
+model AiApproval {
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  agentId        String?          @map("agent_id")
+  workflowId     String?          @map("workflow_id")
+  executionId    String?          @map("execution_id")
+  requesterId    String?          @map("requester_id")
+  approverId     String?          @map("approver_id")
+  action         String
+  entityType     String?          @map("entity_type")
+  entityId       String?          @map("entity_id")
+  payload        Json             @default("{}")
+  status         AiApprovalStatus @default(PENDING)
+  decisionReason String?          @map("decision_reason")
+  requestedAt    DateTime         @default(now()) @map("requested_at")
+  decidedAt      DateTime?        @map("decided_at")
+  expiresAt      DateTime?        @map("expires_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  approver     User?        @relation("ApprovalDecidedBy", fields: [approverId], references: [id], onDelete: SetNull)
+  execution    AiExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("ai_approvals")
+}
+
+model AiExecution {
+  id              String            @id @default(uuid())
+  organizationId  String            @map("organization_id")
+  agentId         String?           @map("agent_id")
+  workflowId      String?           @map("workflow_id")
+  providerId      String?           @map("provider_id")
+  modelId         String?           @map("model_id")
+  capability      String            @default("TEXT_GENERATION")
+  status          AiExecutionStatus @default(RUNNING)
+  startedAt       DateTime          @default(now()) @map("started_at")
+  completedAt     DateTime?         @map("completed_at")
+  durationMs      Int?              @map("duration_ms")
+  inputMetadata   Json              @default("{}") @map("input_metadata")
+  outputMetadata  Json              @default("{}") @map("output_metadata")
+  inputTokens     Int               @default(0) @map("input_tokens")
+  outputTokens    Int               @default(0) @map("output_tokens")
+  totalTokens     Int               @default(0) @map("total_tokens")
+  estimatedCost   Decimal           @default(0) @map("estimated_cost") @db.Decimal(18, 6)
+  errorMessage    String?           @map("error_message")
+  approvalStatus  AiApprovalStatus? @map("approval_status")
+  initiatorUserId String?           @map("initiator_user_id")
+  trigger         String            @default("MANUAL")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  agent        AiAgent?     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  workflow     AiWorkflow?  @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  provider     AiProvider?  @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  model        AiModel?     @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  approvals    AiApproval[]
+
+  @@index([organizationId])
+  @@index([agentId])
+  @@index([workflowId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("ai_executions")
+}
+

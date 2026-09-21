@@ -63,6 +63,7 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
     "content.read", "content.create", "content.update", "content.publish", "content.delete", "authors.read",
     "authors.create", "authors.update", "media.read", "media.upload", "media.update", "media.delete",
     "reports.read", "reports.export", "settings.read", "settings.manage", "audit.read", "ai.use", "ai.manage",
+    "automation.read", "automation.create", "automation.edit", "automation.publish", "automation.execute", "automation.approve", "automation.manage",
     "onboarding.read", "onboarding.create", "onboarding.update", "onboarding.complete", "workspaces.read",
     "workspaces.create", "workspaces.update", "workspaces.suspend", "invitations.read", "invitations.create",
     "invitations.revoke", "contracts.read", "contracts.create", "contracts.update", "contracts.activate",
@@ -77,7 +78,9 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
     "leads.update", "leads.convert", "contacts.read", "contacts.create", "contacts.update", "products.read",
     "products.create", "products.update", "product_modules.read", "product_modules.create", "product_modules.update",
     "product_modules.reorder", "content.read", "content.create", "content.update", "authors.read", "authors.update",
-    "media.read", "media.upload", "media.update", "reports.read", "ai.use", "onboarding.read", "onboarding.create",
+    "media.read", "media.upload", "media.update", "reports.read", "ai.use",
+    "automation.read", "automation.execute", "automation.approve",
+    "onboarding.read", "onboarding.create",
     "onboarding.update", "workspaces.read", "workspaces.create", "workspaces.update", "invitations.read", "invitations.create",
     "contracts.read", "contracts.create", "contracts.update", "subscriptions.read", "subscriptions.create",
     "subscriptions.update", "subscriptions.activate", "subscriptions.pause", "subscriptions.cancel", "invoices.read",
@@ -87,14 +90,16 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
   USER: [
     "clients.read", "leads.read", "leads.create", "leads.update", "contacts.read", "products.read",
     "product_modules.read", "content.read", "content.create", "authors.read", "media.read", "media.upload",
-    "reports.read", "ai.use", "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
+    "reports.read", "ai.use", "automation.read", "automation.execute",
+    "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
     "subscriptions.read", "invoices.read", "payments.read", "portal.dashboard.read", "portal.contracts.read",
     "portal.subscriptions.read", "portal.invoices.read", "portal.payments.read"
   ],
   VIEWER: [
     "users.read", "organizations.read", "roles.read", "clients.read", "leads.read", "contacts.read",
     "products.read", "product_modules.read", "content.read", "authors.read", "media.read", "reports.read",
-    "settings.read", "audit.read", "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
+    "settings.read", "audit.read", "automation.read",
+    "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
     "subscriptions.read", "invoices.read", "payments.read", "portal.dashboard.read", "portal.contracts.read",
     "portal.subscriptions.read", "portal.invoices.read", "portal.payments.read"
   ]
@@ -282,6 +287,288 @@ function initializeMockSeed() {
     createdAt: new Date(),
     updatedAt: new Date(),
   });
+
+  // 11. AI Control Center — Default Provider & Models
+  const aiProviderStore = getStore("aiprovider");
+  const aiModelStore = getStore("aimodel");
+  const aiToolStore = getStore("aitool");
+  const aiAgentStore = getStore("aiagent");
+  const aiPromptStore = getStore("aiprompt");
+  const aiWorkflowStore = getStore("aiworkflow");
+  const aiExecutionStore = getStore("aiexecution");
+  const aiApprovalStore = getStore("aiapproval");
+
+  const geminiProviderId = "provider-gemini-01";
+  aiProviderStore.set(geminiProviderId, {
+    id: geminiProviderId,
+    organizationId: internalOrgId,
+    name: "Google Gemini AI",
+    providerType: "GEMINI",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    credentialRef: "ENV:GEMINI_API_KEY",
+    status: "ACTIVE",
+    isDefault: true,
+    supportedCapabilities: [
+      "TEXT_GENERATION", "SUMMARIZATION", "CLASSIFICATION", "EXTRACTION",
+      "TRANSLATION", "DOCUMENT_ANALYSIS", "STRUCTURED_OUTPUT", "FUNCTION_CALLING",
+      "DATA_ANALYSIS", "CODE_ASSISTANCE", "WORKFLOW_AUTOMATION"
+    ],
+    configuration: { region: "us-central1" },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const mockProviderId = "provider-mock-01";
+  aiProviderStore.set(mockProviderId, {
+    id: mockProviderId,
+    organizationId: internalOrgId,
+    name: "Artify Deterministic Simulator",
+    providerType: "MOCK",
+    baseUrl: null,
+    credentialRef: null,
+    status: "ACTIVE",
+    isDefault: false,
+    supportedCapabilities: [
+      "TEXT_GENERATION", "SUMMARIZATION", "CLASSIFICATION", "EXTRACTION",
+      "TRANSLATION", "EMBEDDINGS", "DOCUMENT_ANALYSIS", "STRUCTURED_OUTPUT", "FUNCTION_CALLING"
+    ],
+    configuration: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const gemini25FlashId = "model-gemini-25-flash";
+  aiModelStore.set(gemini25FlashId, {
+    id: gemini25FlashId,
+    providerId: geminiProviderId,
+    modelName: "gemini-2.5-flash",
+    displayName: "Gemini 2.5 Flash",
+    modelType: "CHAT",
+    contextLimit: 1048576,
+    inputCapabilities: ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
+    outputCapabilities: ["TEXT", "JSON"],
+    supportsTools: true,
+    supportsVision: true,
+    supportsEmbedding: false,
+    status: "ACTIVE",
+    isDefault: true,
+    configMetadata: { costPer1kInputTokens: 0.0001, costPer1kOutputTokens: 0.0004, maxOutputTokens: 8192 },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const gemini37FlashId = "model-gemini-37-flash";
+  aiModelStore.set(gemini37FlashId, {
+    id: gemini37FlashId,
+    providerId: geminiProviderId,
+    modelName: "gemini-3.7-flash",
+    displayName: "Gemini 3.7 Flash Hybrid Reasoning",
+    modelType: "CHAT",
+    contextLimit: 1048576,
+    inputCapabilities: ["TEXT", "IMAGE", "AUDIO"],
+    outputCapabilities: ["TEXT", "JSON"],
+    supportsTools: true,
+    supportsVision: true,
+    supportsEmbedding: false,
+    status: "ACTIVE",
+    isDefault: false,
+    configMetadata: { costPer1kInputTokens: 0.00025, costPer1kOutputTokens: 0.001, maxOutputTokens: 8192 },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // 12. AI Tools
+  const initialTools = [
+    {
+      id: "tool-search-clients",
+      name: "searchClients",
+      displayName: "Search CRM Clients",
+      description: "Search clients by company name, client code, or contact email.",
+      inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      outputSchema: { type: "object", properties: { clients: { type: "array" } } },
+      permission: "clients.read",
+      status: "ACTIVE",
+      riskLevel: "LOW",
+      requiresApproval: false,
+      requiresAudit: true,
+    },
+    {
+      id: "tool-read-invoices",
+      name: "readInvoices",
+      displayName: "Read Invoices",
+      description: "Query commercial invoices for balance, status, and due dates.",
+      inputSchema: { type: "object", properties: { clientId: { type: "string" }, status: { type: "string" } } },
+      outputSchema: { type: "object", properties: { invoices: { type: "array" } } },
+      permission: "invoices.read",
+      status: "ACTIVE",
+      riskLevel: "MEDIUM",
+      requiresApproval: false,
+      requiresAudit: true,
+    },
+    {
+      id: "tool-create-draft-post",
+      name: "createDraftPost",
+      displayName: "Create Draft CMS Post",
+      description: "Create an unpublished blog post draft for editorial review.",
+      inputSchema: { type: "object", properties: { title: { type: "string" }, content: { type: "string" } }, required: ["title", "content"] },
+      outputSchema: { type: "object", properties: { postId: { type: "string" }, status: { type: "string" } } },
+      permission: "content.create",
+      status: "ACTIVE",
+      riskLevel: "MEDIUM",
+      requiresApproval: true,
+      requiresAudit: true,
+    }
+  ];
+  for (const t of initialTools) {
+    aiToolStore.set(t.id, { ...t, createdAt: new Date(), updatedAt: new Date() });
+  }
+
+  // 13. AI Agents
+  const agent1Id = "agent-crm-coworker-01";
+  aiAgentStore.set(agent1Id, {
+    id: agent1Id,
+    organizationId: internalOrgId,
+    name: "CRM Intelligence Assistant",
+    description: "Specialized coworker for synthesizing client interactions and auditing relationship health.",
+    purpose: "Analyze CRM leads, synthesize meeting records, and summarize customer contracts.",
+    status: "ACTIVE",
+    systemInstructions: "You are the Artify CRM Intelligence Agent. Provide accurate, professional synthesis of accounts, leads, and client engagement.",
+    modelId: gemini25FlashId,
+    configuration: { temperature: 0.2, maxTokens: 2048 },
+    allowedTools: ["searchClients", "readInvoices"],
+    allowedCapabilities: ["TEXT_GENERATION", "SUMMARIZATION", "EXTRACTION", "DATA_ANALYSIS"],
+    knowledgeSources: ["CRM_LEADS", "CRM_CLIENTS", "CONTRACTS"],
+    maxExecutionTime: 30,
+    maxTokenLimit: 4096,
+    retryPolicy: { maxRetries: 2, backoffMs: 500 },
+    requireApproval: false,
+    version: 1,
+    createdById: adminUserId,
+    updatedById: adminUserId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const agent2Id = "agent-content-writer-01";
+  aiAgentStore.set(agent2Id, {
+    id: agent2Id,
+    organizationId: internalOrgId,
+    name: "Digital Publishing Coworker",
+    description: "Drafts publication outlines, social summaries, and product announcement briefs.",
+    purpose: "Transform product notes and release highlights into structured CMS drafts.",
+    status: "ACTIVE",
+    systemInstructions: "You are an enterprise brand writer for Artify Solutions. Ensure high factual rigor, concise structure, and clear formatting.",
+    modelId: gemini25FlashId,
+    configuration: { temperature: 0.4, maxTokens: 4096 },
+    allowedTools: ["createDraftPost"],
+    allowedCapabilities: ["TEXT_GENERATION", "STRUCTURED_OUTPUT"],
+    knowledgeSources: ["CMS_POSTS", "PRODUCTS"],
+    maxExecutionTime: 45,
+    maxTokenLimit: 4096,
+    retryPolicy: { maxRetries: 2, backoffMs: 1000 },
+    requireApproval: true,
+    version: 1,
+    createdById: adminUserId,
+    updatedById: adminUserId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // 14. AI Prompts
+  const prompt1Id = "prompt-lead-synthesis";
+  aiPromptStore.set(prompt1Id, {
+    id: prompt1Id,
+    organizationId: internalOrgId,
+    name: "Lead Qualification Summary",
+    description: "Generates an executive lead qualification brief from prospect details.",
+    category: "CRM",
+    systemPrompt: "Synthesize the prospect's background, estimated contract value, and strategic alignment.",
+    template: "Analyze lead {{contact_name}} representing {{company_name}} for project {{project_title}} with budget {{budget}}.",
+    variables: ["contact_name", "company_name", "project_title", "budget"],
+    outputFormat: "MARKDOWN",
+    version: 1,
+    status: "ACTIVE",
+    isActiveVersion: true,
+    createdById: adminUserId,
+    updatedById: adminUserId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // 15. AI Workflow
+  const workflow1Id = "workflow-lead-enrichment";
+  aiWorkflowStore.set(workflow1Id, {
+    id: workflow1Id,
+    organizationId: internalOrgId,
+    name: "Inbound Lead Intelligence & Brief",
+    description: "Autonomous pipeline to extract company profile, query existing relationships, and generate brief.",
+    trigger: "MANUAL",
+    steps: [
+      { step: 1, name: "Extract Prospect Entities", capability: "EXTRACTION" },
+      { step: 2, name: "Lookup Existing Clients", tool: "searchClients" },
+      { step: 3, name: "Draft Executive Brief", agentId: agent1Id }
+    ],
+    conditions: {},
+    agentId: agent1Id,
+    tools: ["searchClients"],
+    inputSchema: { type: "object", properties: { companyName: { type: "string" } } },
+    outputSchema: { type: "object", properties: { brief: { type: "string" } } },
+    requireApproval: false,
+    retryPolicy: { maxRetries: 1, backoffMs: 1000 },
+    timeout: 60,
+    status: "ACTIVE",
+    version: 1,
+    createdById: adminUserId,
+    updatedById: adminUserId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // 16. Demo Execution & Approval
+  const execution1Id = "exec-demo-01";
+  aiExecutionStore.set(execution1Id, {
+    id: execution1Id,
+    organizationId: internalOrgId,
+    agentId: agent1Id,
+    workflowId: null,
+    providerId: geminiProviderId,
+    modelId: gemini25FlashId,
+    capability: "SUMMARIZATION",
+    status: "COMPLETED",
+    startedAt: new Date(Date.now() - 3600000),
+    completedAt: new Date(Date.now() - 3598500),
+    durationMs: 1500,
+    inputMetadata: { promptLength: 140, capability: "SUMMARIZATION" },
+    outputMetadata: { preview: "Apex Global Enterprises engagement status: Active with healthy margin." },
+    inputTokens: 380,
+    outputTokens: 142,
+    totalTokens: 522,
+    estimatedCost: 0.000094,
+    errorMessage: null,
+    approvalStatus: null,
+    initiatorUserId: adminUserId,
+    trigger: "MANUAL",
+  });
+
+  const approval1Id = "approval-demo-01";
+  aiApprovalStore.set(approval1Id, {
+    id: approval1Id,
+    organizationId: internalOrgId,
+    agentId: agent2Id,
+    workflowId: null,
+    executionId: null,
+    requesterId: agent2Id,
+    approverId: null,
+    action: "createDraftPost",
+    entityType: "POST",
+    entityId: null,
+    payload: { title: "Next-Gen Enterprise Analytics Overview", author: "Digital Publishing Coworker" },
+    status: "PENDING",
+    decisionReason: null,
+    requestedAt: new Date(),
+    decidedAt: null,
+    expiresAt: new Date(Date.now() + 86400000 * 7),
+  });
 }
 
 initializeMockSeed();
@@ -315,20 +602,20 @@ function matchesCondition(itemValue: any, condition: any): boolean {
         const searchStr = String(val ?? "").toLowerCase();
         if (!itemStr.endsWith(searchStr)) return false;
       } else if (op === "gt") {
-        const itemTime = itemValue instanceof Date ? itemValue.getTime() : itemValue;
-        const valTime = val instanceof Date ? val.getTime() : val;
+        const itemTime: any = itemValue instanceof Date ? itemValue.getTime() : itemValue;
+        const valTime: any = val instanceof Date ? val.getTime() : val;
         if (!(itemTime > valTime)) return false;
       } else if (op === "gte") {
-        const itemTime = itemValue instanceof Date ? itemValue.getTime() : itemValue;
-        const valTime = val instanceof Date ? val.getTime() : val;
+        const itemTime: any = itemValue instanceof Date ? itemValue.getTime() : itemValue;
+        const valTime: any = val instanceof Date ? val.getTime() : val;
         if (!(itemTime >= valTime)) return false;
       } else if (op === "lt") {
-        const itemTime = itemValue instanceof Date ? itemValue.getTime() : itemValue;
-        const valTime = val instanceof Date ? val.getTime() : val;
+        const itemTime: any = itemValue instanceof Date ? itemValue.getTime() : itemValue;
+        const valTime: any = val instanceof Date ? val.getTime() : val;
         if (!(itemTime < valTime)) return false;
       } else if (op === "lte") {
-        const itemTime = itemValue instanceof Date ? itemValue.getTime() : itemValue;
-        const valTime = val instanceof Date ? val.getTime() : val;
+        const itemTime: any = itemValue instanceof Date ? itemValue.getTime() : itemValue;
+        const valTime: any = val instanceof Date ? val.getTime() : val;
         if (!(itemTime <= valTime)) return false;
       }
     }
@@ -367,8 +654,9 @@ function matchesWhere(item: any, where?: any): boolean {
     if (key.includes("_") && typeof val === "object" && val !== null && !(val instanceof Date) && !Array.isArray(val)) {
       const parts = key.split("_");
       let allPartsMatch = true;
+      const objVal = val as Record<string, unknown>;
       for (const part of parts) {
-        if (val[part] !== undefined && item[part] !== val[part]) {
+        if (objVal[part] !== undefined && item[part] !== objVal[part]) {
           allPartsMatch = false;
           break;
         }
@@ -429,6 +717,26 @@ function applyIncludes(modelName: string, item: any, include?: any): any {
       const fk = lower === "invoice" ? "invoiceId" : "subscriptionId";
       const matched = Array.from(getStore(subStoreName).values()).filter((it) => it[fk] === item.id);
       cloned.items = matched;
+    } else if (relKey === "provider") {
+      cloned.provider = item.providerId ? getStore("aiprovider").get(item.providerId) ?? null : null;
+    } else if (relKey === "model") {
+      cloned.model = item.modelId ? getStore("aimodel").get(item.modelId) ?? null : null;
+    } else if (relKey === "agent") {
+      cloned.agent = item.agentId ? getStore("aiagent").get(item.agentId) ?? null : null;
+    } else if (relKey === "workflow") {
+      cloned.workflow = item.workflowId ? getStore("aiworkflow").get(item.workflowId) ?? null : null;
+    } else if (relKey === "createdBy") {
+      cloned.createdBy = item.createdById ? getStore("user").get(item.createdById) ?? null : null;
+    } else if (relKey === "updatedBy") {
+      cloned.updatedBy = item.updatedById ? getStore("user").get(item.updatedById) ?? null : null;
+    } else if (relKey === "approver") {
+      cloned.approver = item.approverId ? getStore("user").get(item.approverId) ?? null : null;
+    } else if (relKey === "models" && lower === "aiprovider") {
+      cloned.models = Array.from(getStore("aimodel").values()).filter((m) => m.providerId === item.id);
+    } else if (relKey === "versions") {
+      const storeName = lower === "aiagent" ? "aiagentversion" : "aipromptversion";
+      const fk = lower === "aiagent" ? "agentId" : "promptId";
+      cloned.versions = Array.from(getStore(storeName).values()).filter((v) => v[fk] === item.id);
     }
   }
 
@@ -447,6 +755,14 @@ function createModelHandler(modelName: string) {
       return null;
     },
 
+    async findUniqueOrThrow(args: { where: any; include?: any }) {
+      const item = await this.findUnique(args);
+      if (!item) {
+        throw new Error(`No ${modelName} found matching unique criteria.`);
+      }
+      return item;
+    },
+
     async findFirst(args: { where?: any; include?: any; orderBy?: any }) {
       const store = getStore(modelName);
       for (const item of store.values()) {
@@ -455,6 +771,14 @@ function createModelHandler(modelName: string) {
         }
       }
       return null;
+    },
+
+    async findFirstOrThrow(args: { where?: any; include?: any; orderBy?: any }) {
+      const item = await this.findFirst(args);
+      if (!item) {
+        throw new Error(`No ${modelName} found matching criteria.`);
+      }
+      return item;
     },
 
     async findMany(args?: { where?: any; include?: any; orderBy?: any; skip?: number; take?: number }) {
@@ -467,14 +791,16 @@ function createModelHandler(modelName: string) {
       }
       if (args?.orderBy) {
         const orderKey = Object.keys(args.orderBy)[0];
-        const dir = args.orderBy[orderKey] === "desc" ? -1 : 1;
-        results.sort((a, b) => {
-          const valA = a[orderKey];
-          const valB = b[orderKey];
-          if (valA < valB) return -1 * dir;
-          if (valA > valB) return 1 * dir;
-          return 0;
-        });
+        if (orderKey) {
+          const dir = (args.orderBy as Record<string, string>)[orderKey] === "desc" ? -1 : 1;
+          results.sort((a, b) => {
+            const valA = a[orderKey];
+            const valB = b[orderKey];
+            if (valA < valB) return -1 * dir;
+            if (valA > valB) return 1 * dir;
+            return 0;
+          });
+        }
       }
       const skip = args?.skip ?? 0;
       if (skip > 0) results = results.slice(skip);
@@ -496,7 +822,27 @@ function createModelHandler(modelName: string) {
     async create(args: { data: any; include?: any }) {
       const store = getStore(modelName);
       const id = args.data.id || crypto.randomUUID();
+      const defaults: Record<string, any> = {};
+      const lower = modelName.toLowerCase();
+      if (lower === "user") {
+        defaults.status = "ACTIVE";
+        defaults.failedLoginAttempts = 0;
+        defaults.mfaEnabled = false;
+        defaults.version = 1;
+      } else if (lower === "organizationmembership") {
+        defaults.status = "ACTIVE";
+        defaults.isPrimary = true;
+      } else if (lower === "organization") {
+        defaults.status = "ACTIVE";
+        defaults.tier = "GROWTH";
+        defaults.type = "CLIENT";
+      } else if (lower === "aiworkflow") {
+        defaults.status = "DRAFT";
+        defaults.version = 1;
+        defaults.trigger = "MANUAL";
+      }
       const record = {
+        ...defaults,
         ...args.data,
         id,
         createdAt: args.data.createdAt || new Date(),

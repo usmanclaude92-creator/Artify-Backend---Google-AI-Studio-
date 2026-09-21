@@ -4,9 +4,9 @@ import { useAuth } from "../../context/AuthContext";
 import { useRouter } from "../../lib/router";
 import { visibleNavItems } from "../../lib/permissions";
 
-type Section = "Platform" | "CRM" | "Onboarding" | "Workspaces" | "Products" | "CMS" | "Commercial" | "Client Portal";
+type Section = "Platform" | "AI Control Center" | "CRM" | "Onboarding" | "Workspaces" | "Products" | "CMS" | "Commercial" | "Client Portal";
 
-const SECTIONS: Section[] = ["Platform", "CRM", "Onboarding", "Workspaces", "Products", "CMS", "Commercial", "Client Portal"];
+const SECTIONS: Section[] = ["Platform", "AI Control Center", "CRM", "Onboarding", "Workspaces", "Products", "CMS", "Commercial", "Client Portal"];
 
 /** Presentation state only, like the theme preference — safe to persist client-side. */
 const COLLAPSED_STORAGE_KEY = "artify_cc_sidebar_collapsed";

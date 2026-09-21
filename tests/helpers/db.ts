@@ -84,9 +84,17 @@ export async function resetDb(): Promise<void> {
   await prisma.category.deleteMany();
   await prisma.tag.deleteMany();
 
-  // media_upload_sessions CASCADEs on media_id and organization_id, but
-  // delete explicitly before media_assets for clarity (same rationale as
-  // the workspace_invitation comment above).
+  await prisma.aiExecution.deleteMany();
+  await prisma.aiApproval.deleteMany();
+  await prisma.aiWorkflow.deleteMany();
+  await prisma.aiTool.deleteMany();
+  await prisma.aiPromptVersion.deleteMany();
+  await prisma.aiPrompt.deleteMany();
+  await prisma.aiAgentVersion.deleteMany();
+  await prisma.aiAgent.deleteMany();
+  await prisma.aiModel.deleteMany();
+  await prisma.aiProvider.deleteMany();
+
   await prisma.mediaUploadSession.deleteMany();
   await prisma.mediaAsset.deleteMany();
   await prisma.notification.deleteMany();
