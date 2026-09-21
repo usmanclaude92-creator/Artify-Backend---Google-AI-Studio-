@@ -1,0 +1,1348 @@
+// Artify Platform — Phase 2 core data model.
+// Supabase PostgreSQL + Prisma (docs/ADR/ADR-008-supabase-postgresql.md,
+// docs/ADR/ADR-009-prisma-access-layer.md). Domain boundaries match
+// docs/DATABASE_SCHEMA.md and docs/PHASE_2_IMPLEMENTATION.md.
+//
+// Naming: snake_case in PostgreSQL (via @map/@@map), camelCase in the
+// generated Prisma client — see docs/ADR-008 for the naming-convention note.
+// IDs: UUID v4 (server default). Money: NUMERIC(18,3) via Prisma Decimal,
+// never float (docs/ADR/ADR-012-financial-decimal-precision.md). Dates:
+// DATE for business dates (contract/subscription/invoice), TIMESTAMP(3)
+// for event timestamps — see docs/DATABASE_SCHEMA.md §"Date vs Timestamp".
+
+generator client {
+  provider      = "prisma-client-js"
+  // Vercel's Node.js serverless runtime is RHEL-based, distinct from the
+  // build container's own platform ("native") — without this, the query
+  // engine binary generated at build time can be missing/mismatched at
+  // runtime, crashing every request with a bare 500 (no error body).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// IDENTITY: organizations, users, memberships, roles, permissions, sessions
+// =============================================================================
+
+enum OrganizationType {
+  INTERNAL // Artify Solutions itself
+  CLIENT
+  PARTNER
+}
+
+enum OrganizationTier {
+  GROWTH
+  ENTERPRISE
+  CUSTOM
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  TRIAL
+  SUSPENDED
+  ARCHIVED
+}
+
+// The tenant registry. Every tenant-scoped table below carries an explicit
+// organization_id FK to this table (docs/AUTHORIZATION_MODEL.md — fixes the
+// Phase 0 finding that tenant scoping existed in the design but wasn't
+// consistently enforced). Artify Solutions' own operating entity and every
+// client organization are both rows here — see ADR-010.
+model Organization {
+  id        String             @id @default(uuid())
+  name      String
+  legalName String?            @map("legal_name")
+  slug      String             @unique
+  type      OrganizationType   @default(CLIENT)
+  tier      OrganizationTier   @default(GROWTH)
+  status    OrganizationStatus @default(TRIAL)
+  email     String?
+  phone     String?
+  website   String?
+  address   String?
+  country   String?
+  timezone  String             @default("UTC")
+  currency  String             @default("USD") @db.Char(3)
+  locale    String             @default("en")
+  metadata  Json               @default("{}")
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+  deletedAt DateTime?          @map("deleted_at")
+
+  memberships          OrganizationMembership[]
+  users                User[] // legacy/home-organization pointer — see OrganizationMembership doc comment
+  sessions             Session[]
+  auditLogs            AuditLog[]
+  webhookEvents        WebhookEvent[]
+  leads                Lead[]
+  clients              Client[]
+  contacts             Contact[]
+  contracts            Contract[]
+  subscriptions        Subscription[]
+  invoices             Invoice[]
+  payments             Payment[]
+  pages                Page[]
+  posts                Post[]
+  categories           Category[]
+  tags                 Tag[]
+  mediaAssets          MediaAsset[]
+  mediaUploadSessions  MediaUploadSession[]
+  notifications        Notification[]
+  systemSettings       SystemSetting[]
+  onboardings          ClientOnboarding[]
+  invitations          WorkspaceInvitation[]
+  // The operational tenant a CRM Client was provisioned into (Phase 6 —
+  // docs/WORKSPACE_PROVISIONING.md). Reverse side of Client.workspaceOrganizationId.
+  provisionedForClient Client?                  @relation("ClientWorkspace")
+
+  @@map("organizations")
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+// Global user identity (email is globally unique — see ADR-010 "Identity
+// scope" for why, carried over from the Phase 0 real-backend design).
+// `organizationId` is the user's home/primary organization, kept for
+// backward compatibility with the Phase 1 session model (a session is
+// still issued against one organization). OrganizationMembership is the
+// authoritative multi-org model going forward — see that model's doc
+// comment for the transition plan.
+model User {
+  id                  String     @id @default(uuid())
+  organizationId      String     @map("organization_id")
+  email               String     @unique
+  passwordHash        String     @map("password_hash")
+  firstName           String     @map("first_name")
+  lastName            String     @map("last_name")
+  displayName         String?    @map("display_name")
+  phone               String?
+  title               String?
+  roleId              String     @map("role_id")
+  status              UserStatus @default(ACTIVE)
+  mfaEnabled          Boolean    @default(false) @map("mfa_enabled")
+  emailVerifiedAt     DateTime?  @map("email_verified_at")
+  lastLoginAt         DateTime?  @map("last_login_at")
+  failedLoginAttempts Int        @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?  @map("locked_until")
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+  deletedAt           DateTime?  @map("deleted_at")
+  version             Int        @default(1)
+
+  organization              Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  role                      Role                     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  memberships               OrganizationMembership[]
+  sessions                  Session[]
+  passwordResetTokens       PasswordResetToken[]
+  author                    Author?
+  assignedLeads             Lead[]                   @relation("LeadAssignee")
+  managedClients            Client[]                 @relation("ClientAccountManager")
+  createdPages              Page[]                   @relation("PageCreatedBy")
+  createdPosts              Post[]                   @relation("PostCreatedBy")
+  createdRevisions          ContentRevision[]        @relation("RevisionCreatedBy")
+  uploadedMedia             MediaAsset[]             @relation("MediaUploadedBy")
+  uploadSessions            MediaUploadSession[]     @relation("UploadSessionUploadedBy")
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  updatedSystemSettings     SystemSetting[]          @relation("SettingUpdatedBy")
+  auditLogs                 AuditLog[]               @relation("AuditActor")
+  createdOnboardings        ClientOnboarding[]       @relation("OnboardingCreatedBy")
+  completedOnboardings      ClientOnboarding[]       @relation("OnboardingCompletedBy")
+  sentInvitations           WorkspaceInvitation[]    @relation("InvitationInvitedBy")
+  acceptedInvitations       WorkspaceInvitation[]    @relation("InvitationAcceptedUser")
+  createdProducts           Product[]                @relation("ProductCreatedBy")
+  updatedProducts           Product[]                @relation("ProductUpdatedBy")
+  createdContracts          Contract[]               @relation("ContractCreatedBy")
+  createdContractVariations ContractVariation[]      @relation("ContractVariationCreatedBy")
+  createdSubscriptions      Subscription[]           @relation("SubscriptionCreatedBy")
+  cancelledSubscriptions    Subscription[]           @relation("SubscriptionCancelledBy")
+  createdInvoices           Invoice[]                @relation("InvoiceCreatedBy")
+  createdPayments           Payment[]                @relation("PaymentCreatedBy")
+  reversedPayments          Payment[]                @relation("PaymentReversedBy")
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+// The real multi-org model (docs/ADR/ADR-010-multi-tenant-organization-model.md).
+// A user may hold at most one membership row per organization (unique
+// below); status tracks it without deleting history. `isPrimary` marks
+// which membership matches the user's `organizationId` "home org" pointer
+// today — Phase 3 is expected to let a session switch between memberships
+// and retire the User.organizationId pointer in favor of this table alone.
+model OrganizationMembership {
+  id             String           @id @default(uuid())
+  userId         String           @map("user_id")
+  organizationId String           @map("organization_id")
+  roleId         String           @map("role_id")
+  status         MembershipStatus @default(ACTIVE)
+  isPrimary      Boolean          @default(true) @map("is_primary")
+  joinedAt       DateTime         @default(now()) @map("joined_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("organization_memberships")
+}
+
+// Database-backed roles (Phase 0/1 deferred this — see ADR-011). Initial
+// system roles: SUPER_ADMIN, ADMIN, MANAGER, USER, VIEWER (prisma/seed.ts).
+// `isSystem` marks built-in roles that ship with the platform, as opposed
+// to a future custom-role feature (not built in Phase 2).
+model Role {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users           User[]
+  memberships     OrganizationMembership[]
+  rolePermissions RolePermission[]
+  invitations     WorkspaceInvitation[]
+
+  @@map("roles")
+}
+
+// Granular permission registry (docs/ADR-011). Keys are dot-namespaced by
+// module, e.g. "users.read" — see prisma/seed.ts for the full catalog.
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String?
+  module      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  roleId       String   @map("role_id")
+  permissionId String   @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Session tokens are hashed at rest (docs/ADR-011 note; §18) — the raw
+// `art_sess_...` bearer token is only ever known to the client and
+// verified by re-hashing the incoming token and looking up tokenHash. A
+// fast unsalted SHA-256 is appropriate here (unlike password hashing):
+// the input is already a 256-bit cryptographically random value, not a
+// low-entropy secret, so there is nothing for a fast hash to make
+// brute-forceable — this mirrors how GitHub/Auth0 store API tokens.
+model Session {
+  id             String    @id @default(uuid())
+  tokenHash      String    @unique @map("token_hash")
+  userId         String    @map("user_id")
+  organizationId String    @map("organization_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  expiresAt      DateTime  @map("expires_at")
+  revokedAt      DateTime? @map("revoked_at")
+  lastUsedAt     DateTime? @map("last_used_at")
+  ipAddress      String?   @map("ip_address")
+  userAgent      String?   @map("user_agent")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// Password-reset credentials (Phase 3 — docs/AUTHENTICATION_ARCHITECTURE.md).
+// Same at-rest hashing rationale as Session.tokenHash: the raw value is
+// generated server-side as high-entropy random data, never derived from a
+// low-entropy secret, so a fast SHA-256 hash is appropriate (unlike
+// password hashing). Single-use (usedAt), short-lived (expiresAt), and a
+// new request invalidates any prior outstanding token for the same user
+// (server/services/authService.ts) rather than allowing several to be
+// valid at once.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  ipAddress String?   @map("ip_address")
+  userAgent String?   @map("user_agent")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// =============================================================================
+// SECURITY: audit logs
+// =============================================================================
+
+enum AuditActorType {
+  USER
+  AI_COWORKER
+  SYSTEM
+  API_KEY
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+}
+
+// Append-only by application convention (no update/delete repository
+// method exists — tests/security/audit.test.ts asserts this). A
+// DB-role-level REVOKE UPDATE/DELETE grant remains a Phase 16 deployment
+// hardening step. actorUserId is SET NULL on user deletion — deleting a
+// user must never destroy audit history (§38/§46).
+model AuditLog {
+  id             String         @id @default(uuid())
+  organizationId String?        @map("organization_id")
+  actorUserId    String?        @map("actor_user_id")
+  actorName      String?        @map("actor_name")
+  actorType      AuditActorType @default(SYSTEM) @map("actor_type")
+  action         String
+  resourceType   String?        @map("resource_type")
+  resourceId     String?        @map("resource_id")
+  requestId      String?        @map("request_id")
+  result         AuditResult    @default(SUCCESS)
+  ipAddress      String?        @map("ip_address")
+  userAgent      String?        @map("user_agent")
+  beforeData     Json?          @map("before_data")
+  afterData      Json?          @map("after_data")
+  metadata       Json?
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  actor        User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([actorUserId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  VERIFIED
+  REJECTED
+  PROCESSED
+}
+
+// Idempotency + signature-verification trail for inbound webhooks
+// (unchanged from Phase 1 — docs/SECURITY_MODEL.md).
+model WebhookEvent {
+  id             String             @id @default(uuid())
+  organizationId String?            @map("organization_id")
+  provider       String
+  eventType      String             @map("event_type")
+  deliveryId     String             @map("delivery_id")
+  signatureValid Boolean            @map("signature_valid")
+  status         WebhookEventStatus @default(RECEIVED)
+  payload        Json
+  receivedAt     DateTime           @default(now()) @map("received_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, deliveryId])
+  @@index([receivedAt])
+  @@map("webhook_events")
+}
+
+// =============================================================================
+// CRM: leads, clients, contacts
+// =============================================================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+// organizationId = the owning tenant (which Artify-platform organization
+// manages this CRM record — today, effectively always Artify HQ; modeled
+// properly so a future reseller/enterprise tenant could run its own CRM
+// instance without a schema change). The prospect's own company is NOT
+// yet a row in `organizations` — it's inline text until conversion.
+// Phase 5: convertedClientId/convertedAt record the outcome of a
+// successful lead→client conversion (server/services/leadService.ts) —
+// nullable because most leads never convert; both set together, inside
+// the same transaction that flips status to CONVERTED, so a lead can
+// never be "CONVERTED" without a client to point to.
+model Lead {
+  id                String     @id @default(uuid())
+  organizationId    String     @map("organization_id")
+  companyName       String     @map("company_name")
+  contactName       String?    @map("contact_name")
+  email             String?
+  phone             String?
+  source            String?
+  status            LeadStatus @default(NEW)
+  notes             String?
+  assignedTo        String?    @map("assigned_to")
+  convertedClientId String?    @map("converted_client_id")
+  convertedAt       DateTime?  @map("converted_at")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+  deletedAt         DateTime?  @map("deleted_at")
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  assignee        User?        @relation("LeadAssignee", fields: [assignedTo], references: [id], onDelete: SetNull)
+  convertedClient Client?      @relation("LeadConvertedClient", fields: [convertedClientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([assignedTo])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+enum ClientStatus {
+  PROSPECT
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// organizationId = owning tenant scope (see Lead's doc comment — same
+// convention). `clientCode` is unique per tenant, not globally, since two
+// different Artify-platform tenants could reasonably reuse a code.
+// Phase 5: added name/legalName/email/phone/website/address — Phase 2's
+// Client had no name field at all (clientCode is an internal reference,
+// not a display name), which made it unusable as a real CRM record. Name
+// uniqueness is enforced at the service layer (a soft, case-insensitive
+// per-organization check — docs/CRM_ARCHITECTURE.md), not a DB
+// constraint: two organizations legitimately sharing a client name is
+// fine (tenant-scoped), and even within one organization a hard unique
+// constraint would incorrectly reject legitimate near-duplicates a human
+// operator should be allowed to create (e.g. two divisions of one firm).
+// Phase 6: workspaceOrganizationId is the CRM Client's provisioned
+// operational tenant (docs/WORKSPACE_PROVISIONING.md) — a distinct
+// Organization row (type=CLIENT) from the `organizationId` above (which is
+// the CRM-owning tenant, effectively always Artify HQ). Nullable until
+// provisioned; @unique enforces at most one workspace per client (§5) at
+// the database level, not just in application code.
+model Client {
+  id                      String       @id @default(uuid())
+  organizationId          String       @map("organization_id")
+  clientCode              String       @map("client_code")
+  name                    String
+  legalName               String?      @map("legal_name")
+  status                  ClientStatus @default(PROSPECT)
+  email                   String?
+  phone                   String?
+  website                 String?
+  address                 String?
+  accountManager          String?      @map("account_manager")
+  notes                   String?
+  workspaceOrganizationId String?      @unique @map("workspace_organization_id")
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+  deletedAt               DateTime?    @map("deleted_at")
+
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  manager               User?             @relation("ClientAccountManager", fields: [accountManager], references: [id], onDelete: SetNull)
+  workspaceOrganization Organization?     @relation("ClientWorkspace", fields: [workspaceOrganizationId], references: [id], onDelete: SetNull)
+  contacts              Contact[]
+  convertedLeads        Lead[]            @relation("LeadConvertedClient")
+  contracts             Contract[]
+  subscriptions         Subscription[]
+  invoices              Invoice[]
+  onboarding            ClientOnboarding?
+
+  @@unique([organizationId, clientCode])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("clients")
+}
+
+enum ContactStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// A contact is a person, kept separate from Client so one client can have
+// several contacts without duplicating contact data into every client
+// record (§25). `clientId` is nullable — a contact can exist before a
+// formal client relationship does. Phase 5: added isPrimary — exactly the
+// "mark primary" affordance the Control Center UI needs; enforced as
+// at-most-one-primary-per-client at the service layer (a partial unique
+// index would need `WHERE is_primary` which Prisma's schema DSL cannot
+// express — see the hand-added migration SQL).
+model Contact {
+  id             String        @id @default(uuid())
+  organizationId String        @map("organization_id")
+  clientId       String?       @map("client_id")
+  firstName      String        @map("first_name")
+  lastName       String        @map("last_name")
+  email          String?
+  phone          String?
+  jobTitle       String?       @map("job_title")
+  isPrimary      Boolean       @default(false) @map("is_primary")
+  status         ContactStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  deletedAt      DateTime?     @map("deleted_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("contacts")
+}
+
+// =============================================================================
+// ONBOARDING & WORKSPACE PROVISIONING (Phase 6 —
+// docs/CLIENT_ONBOARDING_ARCHITECTURE.md, docs/WORKSPACE_PROVISIONING.md).
+// The workspace itself is NOT a new tenant model — it is a normal
+// Organization row (type=CLIENT), reusing OrganizationStatus for its
+// lifecycle: TRIAL=PENDING (just provisioned), ACTIVE=ACTIVE,
+// SUSPENDED=SUSPENDED, ARCHIVED=DEACTIVATED. See Client.workspaceOrganizationId.
+// =============================================================================
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY
+  COMPLETED
+  CANCELLED
+}
+
+// One onboarding record per Client (1:1 — @unique clientId), independent
+// of workspace status (a workspace can be ACTIVE while onboarding is still
+// IN_PROGRESS, or vice versa — §7). `checklist` is a JSON array of
+// {key, label, completed, completedAt, completedById} so new stages can be
+// added later without a migration (§8's "extensible" requirement);
+// `currentStep` mirrors the first incomplete checklist item for cheap
+// querying/display without re-parsing the JSON on every list row.
+model ClientOnboarding {
+  id             String           @id @default(uuid())
+  organizationId String           @map("organization_id")
+  clientId       String           @unique @map("client_id")
+  status         OnboardingStatus @default(NOT_STARTED)
+  currentStep    String?          @map("current_step")
+  checklist      Json             @default("[]")
+  startedAt      DateTime?        @map("started_at")
+  completedAt    DateTime?        @map("completed_at")
+  cancelledAt    DateTime?        @map("cancelled_at")
+  createdById    String?          @map("created_by")
+  completedById  String?          @map("completed_by")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("OnboardingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  completedBy  User?        @relation("OnboardingCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("client_onboarding")
+}
+
+// Secure client-administrator invitation into a provisioned workspace
+// (§18). Same at-rest hashing convention as Session.tokenHash/
+// PasswordResetToken.tokenHash: the raw `art_invite_...` token is
+// high-entropy random data, never persisted or logged in full, only its
+// SHA-256 hash. No stored status enum — PENDING/ACCEPTED/REVOKED/EXPIRED
+// is derived from acceptedAt/revokedAt/expiresAt at read time (same
+// convention as PasswordResetToken.usedAt) so there is no second source of
+// truth to fall out of sync. A hand-added partial unique index
+// (workspace_invitations_one_pending_per_email, see the migration SQL)
+// prevents two concurrently-outstanding invitations to the same email in
+// the same workspace — Prisma's schema DSL cannot express a filtered
+// unique constraint.
+model WorkspaceInvitation {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  email          String
+  roleId         String    @map("role_id")
+  tokenHash      String    @unique @map("token_hash")
+  invitedById    String?   @map("invited_by")
+  expiresAt      DateTime  @map("expires_at")
+  acceptedAt     DateTime? @map("accepted_at")
+  acceptedUserId String?   @map("accepted_user_id")
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  invitedBy    User?        @relation("InvitationInvitedBy", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedUser User?        @relation("InvitationAcceptedUser", fields: [acceptedUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([expiresAt])
+  @@map("workspace_invitations")
+}
+
+// =============================================================================
+// PRODUCTS: registry for current and future Artify products (HCMS, Payroll,
+// Accounting, CRM, ERP, ...) — none of these are hardcoded in application
+// logic; they are rows created through this registry (§26/§27).
+// =============================================================================
+
+enum ProductType {
+  PRODUCT
+  SERVICE
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+// Phase 7 — platform-global catalog (docs/PRODUCT_CATALOG_ARCHITECTURE.md).
+// Deliberately no organizationId: unlike Client/Lead/Contact (tenant-owned
+// CRM records) or Workspace (a provisioned Organization), a Product is a
+// single shared catalog entry every future subscription/contract can point
+// at — the doc comment on this model has said so since Phase 2 ("none of
+// these are hardcoded in application logic; they are rows created through
+// this registry"). Catalog administration is permission-gated
+// (products.create/update/archive), not row-scoped. Status lifecycle:
+// DRAFT -> ACTIVE -> INACTIVE <-> ACTIVE, DRAFT|INACTIVE -> ARCHIVED
+// (terminal), validated server-side (server/services/productService.ts) —
+// never a physical delete, so a future Subscription/Contract reference
+// always resolves.
+model Product {
+  id               String        @id @default(uuid())
+  code             String        @unique
+  name             String
+  slug             String        @unique
+  type             ProductType
+  shortDescription String?       @map("short_description")
+  description      String?
+  status           ProductStatus @default(DRAFT)
+  isFeatured       Boolean       @default(false) @map("is_featured")
+  displayOrder     Int           @default(0) @map("display_order")
+  version          String        @default("1.0.0")
+  configuration    Json          @default("{}")
+  createdById      String?       @map("created_by")
+  updatedById      String?       @map("updated_by")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  createdBy     User?           @relation("ProductCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?           @relation("ProductUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  modules       ProductModule[]
+  subscriptions Subscription[]
+
+  @@index([status])
+  @@index([type])
+  @@index([displayOrder])
+  @@index([name])
+  @@map("products")
+}
+
+enum ProductModuleStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+// Lets a product register sub-modules (e.g. HCMS -> Employee Management,
+// Attendance, Payroll, Leave, Reports) without a schema redesign per
+// product. Phase 7 (docs/PRODUCT_MODULE_ARCHITECTURE.md) builds real
+// CRUD/reordering on this registry; every module belongs to exactly one
+// product (`productId`, RESTRICT-equivalent via the app layer — see the
+// doc comment on `product` below) and never a physical delete once a
+// future SubscriptionItem could reference it — status carries the
+// lifecycle instead.
+model ProductModule {
+  id           String              @id @default(uuid())
+  productId    String              @map("product_id")
+  code         String
+  name         String
+  slug         String
+  description  String?
+  status       ProductModuleStatus @default(DRAFT)
+  displayOrder Int                 @default(0) @map("display_order")
+  isCore       Boolean             @default(false) @map("is_core")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  // onDelete: Cascade is Phase 2's original choice, kept as-is (a product
+  // is never physically deleted post-Phase 7 — see Product's doc comment —
+  // so this path is now theoretical, not a live data-loss risk).
+  product           Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  subscriptionItems SubscriptionItem[]
+  invoiceItems      InvoiceItem[]
+
+  @@unique([productId, code])
+  @@unique([productId, slug])
+  @@index([status])
+  @@index([displayOrder])
+  @@map("product_modules")
+}
+
+// =============================================================================
+// COMMERCIAL: contracts, subscriptions, invoices, payments (Phase 10 —
+// docs/COMMERCIAL_ARCHITECTURE.md, docs/BILLING_ARCHITECTURE.md). Phase 2
+// built the schema foundation only, with no payment processing/model —
+// Phase 10 completes it. All monetary columns are NUMERIC(18,3) — see
+// ADR-012 — and are Prisma Decimal end-to-end; JS floating-point never
+// touches an authoritative financial value (server/services/billingCalculations.ts).
+// =============================================================================
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  TERMINATED
+}
+
+// Historical/master record — not soft-deleted (§21/§46): a contract's
+// existence is a fact of record, its lifecycle is tracked via `status`,
+// not deletion. `contractValue` is the ORIGINAL value only — never
+// overwritten; the current value is original + Σ(variations.amount),
+// computed on read from ContractVariation, never cached (see that
+// model's doc comment for why).
+model Contract {
+  id             String         @id @default(uuid())
+  contractNumber String         @unique @map("contract_number")
+  organizationId String         @map("organization_id")
+  clientId       String         @map("client_id")
+  title          String
+  description    String?
+  status         ContractStatus @default(DRAFT)
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime?      @map("end_date") @db.Date
+  contractValue  Decimal        @map("contract_value") @db.Decimal(18, 3)
+  currency       String         @db.Char(3)
+  notes          String?
+  createdById    String?        @map("created_by")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client       Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy    User?               @relation("ContractCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  variations   ContractVariation[]
+  invoices     Invoice[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("contracts")
+}
+
+/**
+ * A commercial change to a contract's value over time (§5). Never
+ * overwrites `Contract.contractValue` — each variation is its own
+ * immutable row; the contract's *current* value is always
+ * `contractValue + Σ(variations.amount)`, computed on read
+ * (contractService.getContract/withCurrentValue) rather than cached on Contract, so
+ * there is exactly one source of truth and no cache-consistency surface
+ * to maintain. `amount` may be negative (a reduction) or positive (an
+ * increase) — `variationNumber` is a per-contract sequential counter
+ * assigned transactionally, so the full history can always be replayed
+ * in order.
+ */
+model ContractVariation {
+  id              String   @id @default(uuid())
+  contractId      String   @map("contract_id")
+  variationNumber Int      @map("variation_number")
+  amount          Decimal  @db.Decimal(18, 3)
+  effectiveDate   DateTime @map("effective_date") @db.Date
+  reason          String
+  createdById     String?  @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  contract  Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  createdBy User?    @relation("ContractVariationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([contractId, variationNumber])
+  @@map("contract_variations")
+}
+
+enum SubscriptionStatus {
+  DRAFT
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  PAUSED
+  CANCELLED
+  EXPIRED
+}
+
+enum BillingCycle {
+  ONE_TIME
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+// Not soft-deleted — same reasoning as Contract; use `status` (CANCELLED/
+// EXPIRED) instead of deletion. `price`/`currency` are this subscription's
+// own snapshot at creation time — never a live FK to a mutable Product
+// price, so a later product price change never rewrites an existing
+// subscription (§9/§10; Product/ProductModule have no shared price list
+// to snapshot from in the first place — see docs/BILLING_ARCHITECTURE.md).
+model Subscription {
+  id                 String             @id @default(uuid())
+  subscriptionNumber String             @unique @map("subscription_number")
+  organizationId     String             @map("organization_id")
+  clientId           String             @map("client_id")
+  productId          String             @map("product_id")
+  status             SubscriptionStatus @default(DRAFT)
+  startDate          DateTime           @map("start_date") @db.Date
+  renewalDate        DateTime?          @map("renewal_date") @db.Date
+  endDate            DateTime?          @map("end_date") @db.Date
+  billingCycle       BillingCycle       @map("billing_cycle")
+  quantity           Int                @default(1)
+  price              Decimal            @db.Decimal(18, 3)
+  currency           String             @db.Char(3)
+  cancelledAt        DateTime?          @map("cancelled_at")
+  cancellationReason String?            @map("cancellation_reason")
+  cancelledById      String?            @map("cancelled_by")
+  createdById        String?            @map("created_by")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client       Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  product      Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy    User?              @relation("SubscriptionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy  User?              @relation("SubscriptionCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  items        SubscriptionItem[]
+  invoices     Invoice[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("subscriptions")
+}
+
+model SubscriptionItem {
+  id              String   @id @default(uuid())
+  subscriptionId  String   @map("subscription_id")
+  productModuleId String?  @map("product_module_id")
+  description     String
+  quantity        Int      @default(1)
+  unitPrice       Decimal  @map("unit_price") @db.Decimal(18, 3)
+  currency        String   @db.Char(3)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  subscription  Subscription   @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  productModule ProductModule? @relation(fields: [productModuleId], references: [id], onDelete: SetNull)
+
+  @@map("subscription_items")
+}
+
+/**
+ * DRAFT: being built, freely editable. ISSUED (renamed from SENT — the
+ * exact word the Phase 10 brief's workflow/endpoints use, "POST
+ * /invoices/:id/issue"): immutable financial record from this point on
+ * (§36) — line items, totals, currency, invoice number, and issue date
+ * can no longer change. PARTIALLY_PAID/PAID are derived from persisted
+ * Payment rows, never set directly by a caller (§19). OVERDUE is a
+ * computed *effective* state (issued, outstanding, past due date), not a
+ * column a background job flips — see billingService.effectiveInvoiceStatus.
+ * VOID/CANCELLED are terminal, reached only through their own dedicated
+ * endpoints.
+ */
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+  CANCELLED
+}
+
+// Immutable financial record once ISSUED — no soft delete (§21/§46/§50).
+// Void via `status: VOID`, never deletion. `amountPaid`/`amountDue` are
+// cached totals, always recomputed transactionally from the Invoice's own
+// Payment rows on every payment record/reversal (§19) — never trusted
+// from a request body.
+model Invoice {
+  id             String        @id @default(uuid())
+  invoiceNumber  String        @unique @map("invoice_number")
+  organizationId String        @map("organization_id")
+  clientId       String        @map("client_id")
+  contractId     String?       @map("contract_id")
+  subscriptionId String?       @map("subscription_id")
+  status         InvoiceStatus @default(DRAFT)
+  issueDate      DateTime      @map("issue_date") @db.Date
+  dueDate        DateTime      @map("due_date") @db.Date
+  currency       String        @db.Char(3)
+  subtotal       Decimal       @db.Decimal(18, 3)
+  tax            Decimal       @default(0) @db.Decimal(18, 3)
+  discount       Decimal       @default(0) @db.Decimal(18, 3)
+  total          Decimal       @db.Decimal(18, 3)
+  amountPaid     Decimal       @default(0) @map("amount_paid") @db.Decimal(18, 3)
+  amountDue      Decimal       @map("amount_due") @db.Decimal(18, 3)
+  notes          String?
+  voidReason     String?       @map("void_reason")
+  createdById    String?       @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  contract     Contract?     @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  createdBy    User?         @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items        InvoiceItem[]
+  payments     Payment[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+// A line's historical snapshot — description/unitPrice/discount/lineTotal
+// never change after the invoice is issued (§13/§36), regardless of any
+// later change to the referenced Product/ProductModule.
+model InvoiceItem {
+  id              String   @id @default(uuid())
+  invoiceId       String   @map("invoice_id")
+  productModuleId String?  @map("product_module_id")
+  description     String
+  quantity        Int      @default(1)
+  unitPrice       Decimal  @map("unit_price") @db.Decimal(18, 3)
+  discount        Decimal  @default(0) @db.Decimal(18, 3)
+  lineTotal       Decimal  @map("line_total") @db.Decimal(18, 3)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  invoice       Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productModule ProductModule? @relation(fields: [productModuleId], references: [id], onDelete: SetNull)
+
+  @@map("invoice_items")
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CARD
+  CASH
+  CHEQUE
+  ONLINE
+  OTHER
+}
+
+/**
+ * PENDING: recorded but not yet cleared (rare — most manually-recorded
+ * payments go straight to COMPLETED). COMPLETED: money received,
+ * counts toward the invoice's amountPaid. FAILED: recorded but never
+ * cleared, never counted. REVERSED: a completed payment that was
+ * corrected — the row is never deleted or its amount/date/method
+ * changed (§17/§50); reversal is recorded as an additional, append-only
+ * set of fields on this same row (reversedAt/reversedById/reversalReason),
+ * and a REVERSED payment stops counting toward amountPaid.
+ */
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+model Payment {
+  id             String        @id @default(uuid())
+  invoiceId      String        @map("invoice_id")
+  organizationId String        @map("organization_id")
+  amount         Decimal       @db.Decimal(18, 3)
+  currency       String        @db.Char(3)
+  paymentDate    DateTime      @map("payment_date") @db.Date
+  method         PaymentMethod
+  reference      String?
+  status         PaymentStatus @default(COMPLETED)
+  notes          String?
+  reversalReason String?       @map("reversal_reason")
+  reversedAt     DateTime?     @map("reversed_at")
+  reversedById   String?       @map("reversed_by")
+  createdById    String?       @map("created_by")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  invoice      Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy    User?        @relation("PaymentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  reversedBy   User?        @relation("PaymentReversedBy", fields: [reversedById], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@index([organizationId])
+  @@map("payments")
+}
+
+// =============================================================================
+// CMS: pages, posts, categories, tags, authors, content_revisions
+// =============================================================================
+
+enum ContentStatus {
+  DRAFT
+  IN_REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+// A thin public-facing profile over a User (bio/avatar), not a duplicate
+// identity — every author is a user, not every user is an author.
+model Author {
+  id        String   @id @default(uuid())
+  userId    String   @unique @map("user_id")
+  bio       String?
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  posts Post[]
+
+  @@map("authors")
+}
+
+model Category {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  slug           String
+  name           String
+  description    String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  posts        Post[]
+
+  @@unique([organizationId, slug])
+  @@map("categories")
+}
+
+model Tag {
+  id             String   @id @default(uuid())
+  organizationId String   @map("organization_id")
+  slug           String
+  name           String
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  posts        PostTag[]
+
+  @@unique([organizationId, slug])
+  @@map("tags")
+}
+
+model Page {
+  id                String        @id @default(uuid())
+  organizationId    String        @map("organization_id")
+  slug              String
+  title             String
+  status            ContentStatus @default(DRAFT)
+  currentRevisionId String?       @unique @map("current_revision_id")
+  featuredMediaId   String?       @map("featured_media_id")
+  createdById       String?       @map("created_by")
+  publishedAt       DateTime?     @map("published_at")
+  scheduledAt       DateTime?     @map("scheduled_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy       User?             @relation("PageCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  currentRevision ContentRevision?  @relation("PageCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  revisions       ContentRevision[] @relation("PageRevisions")
+  featuredMedia   MediaAsset?       @relation("PageFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+  @@map("pages")
+}
+
+model Post {
+  id                String        @id @default(uuid())
+  organizationId    String        @map("organization_id")
+  slug              String
+  title             String
+  status            ContentStatus @default(DRAFT)
+  categoryId        String?       @map("category_id")
+  authorId          String?       @map("author_id")
+  currentRevisionId String?       @unique @map("current_revision_id")
+  featuredMediaId   String?       @map("featured_media_id")
+  createdById       String?       @map("created_by")
+  publishedAt       DateTime?     @map("published_at")
+  scheduledAt       DateTime?     @map("scheduled_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+  deletedAt         DateTime?     @map("deleted_at")
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  category        Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author          Author?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdBy       User?             @relation("PostCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  currentRevision ContentRevision?  @relation("PostCurrentRevision", fields: [currentRevisionId], references: [id], onDelete: SetNull)
+  revisions       ContentRevision[] @relation("PostRevisions")
+  tags            PostTag[]
+  featuredMedia   MediaAsset?       @relation("PostFeaturedMedia", fields: [featuredMediaId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+  @@index([categoryId])
+  @@index([authorId])
+  @@map("posts")
+}
+
+model PostTag {
+  postId String @map("post_id")
+  tagId  String @map("tag_id")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag  Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+// One shared revision table for both Pages and Posts (§31 asks for a
+// single content_revisions model, not one per content type). Referential
+// integrity is kept real (no polymorphic FK): exactly one of pageId/postId
+// is set, enforced by a CHECK constraint added by hand to the initial
+// migration (Prisma's schema DSL has no native CHECK syntax) — see
+// prisma/migrations/.../migration.sql. Revisions are immutable once
+// published at the application layer (no update-after-publish service
+// method) — see docs/DATABASE_SCHEMA.md.
+model ContentRevision {
+  id          String        @id @default(uuid())
+  pageId      String?       @map("page_id")
+  postId      String?       @map("post_id")
+  version     Int
+  status      ContentStatus
+  title       String
+  body        String
+  metadata    Json          @default("{}")
+  createdById String?       @map("created_by")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  publishedAt DateTime?     @map("published_at")
+
+  page           Page? @relation("PageRevisions", fields: [pageId], references: [id], onDelete: Cascade)
+  post           Post? @relation("PostRevisions", fields: [postId], references: [id], onDelete: Cascade)
+  createdBy      User? @relation("RevisionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  pageCurrentFor Page? @relation("PageCurrentRevision")
+  postCurrentFor Post? @relation("PostCurrentRevision")
+
+  @@index([pageId])
+  @@index([postId])
+  @@map("content_revisions")
+}
+
+// =============================================================================
+// MEDIA: metadata only — object storage itself is Phase 9 (§33).
+// =============================================================================
+
+/**
+ * Media lifecycle (Phase 9 — docs/MEDIA_ARCHITECTURE.md). PENDING: an
+ * upload session exists but the object hasn't been confirmed in storage
+ * yet (renamed from UPLOADING for the exact wording the upload-session
+ * design uses). ACTIVE: confirmed and usable (renamed from READY). FAILED:
+ * confirmation/validation failed (bad signature, missing object, size
+ * mismatch). ARCHIVED: explicitly archived by a user — hidden from the
+ * default library view but preserved and still resolvable, the same
+ * status-vs-deletedAt dual mechanism used for Client (Phase 5) and
+ * Page/Post (Phase 8); a genuine soft-delete is the separate `deletedAt`
+ * column below, never a physical row delete. (Renamed from DELETED, which
+ * conflated "hidden" with "gone" — 0 rows existed under the old names, so
+ * this rename is non-breaking.)
+ */
+enum MediaStatus {
+  PENDING
+  ACTIVE
+  FAILED
+  ARCHIVED
+}
+
+enum MediaVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+model MediaAsset {
+  id               String          @id @default(uuid())
+  organizationId   String          @map("organization_id")
+  originalFilename String          @map("original_filename")
+  displayName      String?         @map("display_name")
+  storageProvider  String          @map("storage_provider")
+  storageBucket    String          @map("storage_bucket")
+  storageKey       String          @unique @map("storage_key")
+  mimeType         String          @map("mime_type")
+  sizeBytes        BigInt          @map("size_bytes")
+  checksum         String?
+  width            Int?
+  height           Int?
+  durationSeconds  Int?            @map("duration_seconds")
+  altText          String?         @map("alt_text")
+  caption          String?
+  visibility       MediaVisibility @default(PRIVATE)
+  status           MediaStatus     @default(PENDING)
+  uploadedById     String?         @map("uploaded_by")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+  deletedAt        DateTime?       @map("deleted_at")
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  uploadedBy       User?               @relation("MediaUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadSession    MediaUploadSession?
+  featuredForPages Page[]              @relation("PageFeaturedMedia")
+  featuredForPosts Post[]              @relation("PostFeaturedMedia")
+
+  @@index([organizationId, status])
+  @@map("media_assets")
+}
+
+/**
+ * Bearer-secret-backed authorization for a single presigned/direct upload
+ * (Phase 9 §14 — docs/MEDIA_ARCHITECTURE.md). One row per MediaAsset
+ * (1:1 — a fresh upload always gets a fresh MediaAsset, never a reused
+ * session). `tokenHash` is the only persisted form of the upload secret,
+ * hashed the same way as every other bearer credential in this codebase
+ * (server/utils/crypto.ts `hashToken` — see invitation/session tokens);
+ * the raw token is returned to the caller exactly once, at creation.
+ */
+model MediaUploadSession {
+  id             String    @id @default(uuid())
+  mediaId        String    @unique @map("media_id")
+  organizationId String    @map("organization_id")
+  uploadedById   String?   @map("uploaded_by")
+  storageKey     String    @map("storage_key")
+  tokenHash      String    @map("token_hash")
+  expiresAt      DateTime  @map("expires_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  media        MediaAsset   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation("UploadSessionUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@map("media_upload_sessions")
+}
+
+// =============================================================================
+// NOTIFICATIONS: minimal foundation only — no dispatch engine (§34).
+// =============================================================================
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+model Notification {
+  id             String             @id @default(uuid())
+  organizationId String?            @map("organization_id")
+  userId         String             @map("user_id")
+  type           String
+  title          String
+  message        String
+  status         NotificationStatus @default(UNREAD)
+  readAt         DateTime?          @map("read_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  SMS
+}
+
+model NotificationPreference {
+  id               String              @id @default(uuid())
+  userId           String              @map("user_id")
+  channel          NotificationChannel
+  notificationType String              @map("notification_type")
+  enabled          Boolean             @default(true)
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel, notificationType])
+  @@map("notification_preferences")
+}
+
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+
+enum SettingType {
+  STRING
+  NUMBER
+  BOOLEAN
+  JSON
+}
+
+enum SettingScope {
+  GLOBAL
+  ORGANIZATION
+}
+
+// `organizationId` is always set (NOT NULL) — "global" settings are simply
+// the settings owned by Artify's own operating organization (type=INTERNAL),
+// which avoids the NULL-uniqueness edge case a nullable org-scoped design
+// would need a partial index for for no real benefit at current scale. See
+// docs/DATABASE_SCHEMA.md for the reasoning.
+model SystemSetting {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  key            String
+  value          Json
+  type           SettingType  @default(STRING)
+  scope          SettingScope @default(ORGANIZATION)
+  description    String?
+  updatedById    String?      @map("updated_by")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  updatedBy    User?        @relation("SettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, key])
+  @@map("system_settings")
+}

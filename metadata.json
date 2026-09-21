@@ -1,0 +1,6 @@
+{
+  "name": "Artify Sols - Super Admin Control Center",
+  "description": "Production-ready enterprise Super Admin Control Center and digital governance platform for Artify Sols ecosystem.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

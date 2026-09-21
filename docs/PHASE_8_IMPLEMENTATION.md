@@ -1,0 +1,63 @@
+# Phase 8 — CMS: Pages, Blog & Content Management
+
+Implementation notes, scoped to the brief: pages, posts, categories/tags, authors, publishing workflow, revisions/revert, optimistic concurrency, permissions, audit, Control Center UI — evolving the Phase 2 CMS schema rather than replacing it. No Media Library, subscriptions/billing, AI, public website integration, or background-job worker — see `docs/CMS_ARCHITECTURE.md`, `docs/CONTENT_WORKFLOW_ARCHITECTURE.md`, and `docs/PHASE_8_COMPLETION_REPORT.md` for status.
+
+## What changed, and why
+
+### 1. Inspection findings — Phase 2 had the full schema, zero application code
+`Page`, `Post`, `Category`, `Tag`, `PostTag`, `ContentRevision`, `Author`, `ContentStatus` all existed since Phase 2, complete with the `content_revisions_exactly_one_parent` CHECK constraint and the "immutable once published" doc comment on `ContentRevision`. Grepped `server/` for `prisma.page`/`prisma.post`/`prisma.category`/`prisma.tag`/`prisma.contentRevision`/`prisma.author` — zero matches. Verified via `psql` that all six CMS tables had 0 rows in every environment. `content.read/create/update/publish/delete` permissions were already seeded (Phase 2) but nothing enforced them. Conclusion: build the CRUD/workflow layer Phase 2 planned for; no new tables.
+
+### 2. Database migration (`prisma/migrations/20260925000001_phase8_cms_indexes/`)
+Purely additive indexes, no column/table changes: `@@index([organizationId, status])` on `Page` and `Post` (the hot query pattern for every list endpoint), `@@index([categoryId])` and `@@index([authorId])` on `Post` (previously unindexed FK columns), `@@index([tagId])` on `PostTag` (the reverse "posts with this tag" lookup — the composite PK `(postId, tagId)` only serves `postId`-first queries). Verified as both an upgrade (`artify_dev`, `artify_test`) and from a from-scratch database (all 7 migrations apply in order, this one last).
+
+### 3. CMS ownership — organization-scoped (not global like Product)
+`Page`/`Post`/`Category`/`Tag` already carried `organizationId` in the Phase 2 schema — the opposite of `Product`'s deliberate global design. Phase 8 preserves this: every repository's only by-id lookup is `findByIdInOrg`. `Author` is the one exception (no `organizationId` on it in the Phase 2 schema — it's a thin global profile over `User`), handled permission-gated-only like `Product`. Full reasoning in `docs/CMS_ARCHITECTURE.md`.
+
+### 4. Backend additions
+Repositories: `pageRepository`, `postRepository`, `categoryRepository`, `tagRepository`, `authorRepository` (all thin — single-model CRUD, `findByIdInOrg`/`findUniqueSlugInOrg`/local `slugify()`, matching `leadRepository`/`productRepository`'s established shape; multi-model transactional orchestration lives in the services, not the repositories, matching `workspaceService.provisionWorkspace`'s precedent). Services: `pageService`, `postService` (parallel, intentionally not sharing an abstraction — see `docs/CONTENT_WORKFLOW_ARCHITECTURE.md`), `categoryService`, `tagService`, `authorService`. Routes: `pageRoutes`, `postRoutes`, `categoryRoutes`, `tagRoutes`, `authorRoutes`, all mounted under `/api/v1` in `server/routes/v1/index.ts`.
+
+### 5. Permissions
+Reuses Phase 2's `content.read/create/update/publish/delete` for pages/posts/categories/tags **unchanged** — no new content permission keys. Three new keys added for the one genuinely new resource, `authors.read/create/update` (no `authors.archive` — see `docs/CMS_ARCHITECTURE.md`), granted ADMIN full, MANAGER read+update, USER/VIEWER read-only.
+
+### 6. Endpoints
+
+```
+GET/POST   /pages                       content.read / content.create
+GET/PATCH  /pages/:id                   content.read / content.update
+DELETE     /pages/:id                   content.delete (soft-delete)
+GET        /pages/:id/revisions         content.read
+POST       /pages/:id/submit-review     content.update
+POST       /pages/:id/publish           content.publish
+POST       /pages/:id/schedule          content.publish
+POST       /pages/:id/archive           content.delete
+POST       /pages/:id/revert            content.update
+```
+(`/posts/...` identical.)
+```
+GET/POST      /categories               content.read / content.create
+GET/PATCH/DELETE /categories/:id        content.read / content.update / content.delete
+GET/POST      /tags                     content.read / content.create
+GET/PATCH/DELETE /tags/:id              content.read / content.update / content.delete
+GET/POST      /authors                  authors.read / authors.create
+GET/PATCH     /authors/:id              authors.read / authors.update
+```
+
+Every endpoint: `authenticateToken` + `requirePermission`, Zod-validated body/query, standard `sendSuccess`/error envelope, never a raw database error. See `docs/CONTENT_WORKFLOW_ARCHITECTURE.md` for the full workflow state machine, content-validation rules, revision/revert design, and optimistic-concurrency mechanism.
+
+### 7. Slugs
+Server-generated by default (from title, collision-safe via each repository's `findUniqueSlugInOrg` suffix loop) or caller-supplied and validated (`^[a-z0-9-]+$`), unique per organization (`@@unique([organizationId, slug])`, unchanged Phase 2 constraint). Duplicate checks happen at the service layer before insert *and* the DB unique constraint is the real backstop — a race caught via `P2002` folds into a clean 409, proven by concurrency tests for pages and posts that fire real concurrent HTTP requests.
+
+### 8. Categories and tags
+Simple organization-scoped CRUD (list/get/create/update/delete), normalized name/slug, per-organization unique slug, real `DELETE` (no archive state — the Phase 2 schema has none, and the FK `SetNull`/`Cascade` behavior on `Post.categoryId`/`PostTag` makes hard-delete safe without one; see `docs/CMS_ARCHITECTURE.md`). Post create/update validates `categoryId`/`tagIds` belong to the caller's own organization before writing (400 `ValidationError` otherwise) — an IDOR-safe FK check, tested directly against a category/tag from a different organization.
+
+### 9. Authors
+`authorService.createAuthor` validates the target `userId` exists and has no existing Author profile (409 on duplicate) before creating a `bio`/`avatarUrl` row linked to it. No password, session, or role field is ever touched — see `docs/CMS_ARCHITECTURE.md`'s identity-escalation-safety note, backed by a dedicated test.
+
+### 10. Audit logging
+Reuses the existing unmodified `auditLogRepository.record()` — no second mechanism. Events: `PAGE_CREATED/UPDATED/SUBMITTED_FOR_REVIEW/PUBLISHED/SCHEDULED/ARCHIVED/REVERTED/DELETED`, the identical `POST_*` set, `CATEGORY_CREATED/UPDATED/DELETED`, `TAG_CREATED/UPDATED/DELETED`, `AUTHOR_CREATED/UPDATED`. Metadata carries only relevant before/after fields (status, title, slug, revision version), never a raw request-body dump.
+
+### 11. Frontend
+`src/lib/api.ts` gained `pagesApi`/`postsApi`/`categoriesApi`/`tagsApi`/`authorsApi` and their types. `NavItem.section` gained `"CMS"` with four entries (Pages, Blog Posts, Categories & Tags, Authors), gated by `content.read`/`authors.read` respectively; `Sidebar.tsx`'s `sections` array updated to render it. Four new pages: `PagesPage.tsx`/`PostsPage.tsx` (master-detail, matching `ProductsPage.tsx`'s established shape, with workflow-action buttons gated per-permission, a revision-history modal with per-revision revert, and a schedule-date modal), `CmsTaxonomyPage.tsx` (categories+tags side by side, matching the lighter CRUD-only pages), `AuthorsPage.tsx` (list + create/edit, no archive UI to match the backend). All data is real API data — no fabricated content anywhere (confirmed by the same fabricated-data regression pattern used in every prior phase's tests).
+
+### 12. Deliberate Phase 8 scope boundaries
+No Media Library / file upload (featured images are metadata/reference fields only, inside the existing `ContentRevision.metadata` JSON column — no binary storage was built). No background-job worker — `SCHEDULED` content is persisted correctly but never auto-publishes; explicitly deferred to Phase 13 (see `docs/CONTENT_WORKFLOW_ARCHITECTURE.md`'s scheduling section). No public website rendering — `artifysolscom` was not touched; the CMS is Control Center/admin-facing only, exposing an API later phases can consume. No AI, subscriptions/billing, or notification integration.
