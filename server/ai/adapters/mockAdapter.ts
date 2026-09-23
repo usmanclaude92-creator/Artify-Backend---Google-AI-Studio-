@@ -26,7 +26,7 @@ export class MockAdapter implements AiModelAdapter {
     } else if (prompt.toLowerCase().includes("classif") || prompt.toLowerCase().includes("categor")) {
       responseText = `**Classification Result**\n- Primary Category: HIGH_PRIORITY\n- Confidence Score: 0.92\n- Strategic Alignment: Enterprise Tier Growth`;
     } else {
-      responseText = `Artify Intelligence Response:\n\nAnalysis completed successfully for model ${params.modelName}.\n\nParameters evaluated: temperature=${params.temperature ?? 0.3}, maxTokens=${params.maxTokens ?? 2048}.\nSystem instructions observed: ${params.systemInstruction ? "Active" : "None"}.\n\nOutput: High quality deterministic synthesis conforming to Artify enterprise governance policies.`;
+      responseText = `Artify Intelligence Response:\n\nAnalysis completed successfully for model ${params.modelName}.\n\nParameters evaluated: temperature=${params.temperature ?? 0.3}, maxTokens=${params.maxTokens ?? 2048}.\nSystem instructions observed: ${params.systemInstruction ? "Active" : "None"}.\n\nEvaluated input: ${prompt}\n\nOutput: High quality deterministic synthesis conforming to Artify enterprise governance policies.`;
     }
 
     const durationMs = Math.max(15, Date.now() - start);
@@ -49,5 +49,20 @@ export class MockAdapter implements AiModelAdapter {
       responseMimeType: "application/json",
     });
     return JSON.parse(res.text) as T;
+  }
+
+  public async generateEmbedding(params: { text: string; modelName?: string; dimension?: number }): Promise<number[]> {
+    const dim = params.dimension || 768;
+    const text = params.text.toLowerCase();
+    const vec = new Array(dim).fill(0);
+    // Deterministic semantic-like hash simulation for unit & integration testing
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      const idx = (code * 31 + i * 17) % dim;
+      vec[idx] = (vec[idx] + (code / 255.0)) % 1.0;
+    }
+    // Normalize vector to unit length
+    const norm = Math.sqrt(vec.reduce((sum, v) => sum + v * v, 0)) || 1;
+    return vec.map((v) => Number((v / norm).toFixed(6)));
   }
 }

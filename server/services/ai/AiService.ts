@@ -432,7 +432,8 @@ export class AiService {
     userId: string,
     userPermissions: readonly string[],
     params: {
-      prompt: string;
+      prompt?: string;
+      promptId?: string;
       capability?: string;
       agentId?: string;
       modelId?: string;
@@ -443,11 +444,22 @@ export class AiService {
       maxTokens?: number;
     }
   ) {
+    let finalPrompt = params.prompt || "";
+    let finalSystemInstruction = params.systemInstruction;
+    if (params.promptId) {
+      const promptRecord = await this.getPrompt(params.promptId, organizationId);
+      finalPrompt = promptRecord.template;
+      if (!finalSystemInstruction && promptRecord.systemPrompt) {
+        finalSystemInstruction = promptRecord.systemPrompt;
+      }
+    }
     return aiOrchestrator.execute({
       organizationId,
       userId,
       userPermissions,
       ...params,
+      prompt: finalPrompt,
+      systemInstruction: finalSystemInstruction,
     });
   }
 }

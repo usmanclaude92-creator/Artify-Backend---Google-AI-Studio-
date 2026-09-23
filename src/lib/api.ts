@@ -1478,3 +1478,181 @@ export const aiApi = {
   } }>("/ai/execute", payload),
 };
 
+// ---------------------------------------------------------------------------
+// Phase 15 — AI Copilot & Conversational Workspace Types & API
+// ---------------------------------------------------------------------------
+
+export interface CopilotWorkspace {
+  id: string;
+  organizationId: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  icon: string;
+  isSystem: boolean;
+  isDefault: boolean;
+  allowedAgents: string[];
+  allowedTools: string[];
+  knowledgeScope: Record<string, unknown>;
+  allowedModules: string[];
+  requiredPermissions: string[];
+  systemInstruction?: string | null;
+  defaultMode: "ANSWER" | "EXPLAIN" | "SUMMARIZE" | "ANALYZE" | "RECOMMEND" | "DRAFT" | "EXECUTE";
+  temperature: number;
+  maxTokens: number;
+  requireCitations: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CopilotActionPreview {
+  id: string;
+  organizationId: string;
+  conversationId: string;
+  messageId?: string | null;
+  toolName: string;
+  actionType: string;
+  targetEntity?: string | null;
+  changesSummary: string;
+  parameters: Record<string, unknown>;
+  riskLevel: string;
+  reason?: string | null;
+  status: "PENDING" | "CONFIRMED" | "REJECTED" | "EXECUTED" | "FAILED";
+  executionResult?: Record<string, unknown> | null;
+  requiresApproval: boolean;
+  approvalId?: string | null;
+  confirmedById?: string | null;
+  confirmedAt?: string | null;
+  createdAt: string;
+}
+
+export interface CopilotCitation {
+  documentId: string;
+  documentTitle: string;
+  chunkId?: string;
+  snippet: string;
+  relevanceScore: number;
+  collectionName?: string;
+}
+
+export interface CopilotMessage {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  status: "SENT" | "STREAMING" | "COMPLETED" | "FAILED" | "CANCELLED";
+  providerType?: string | null;
+  modelName?: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  durationMs: number;
+  estimatedCost: number;
+  correlationId?: string | null;
+  citations?: CopilotCitation[];
+  toolCalls?: Array<{ tool: string; result: unknown }>;
+  actionPreview?: CopilotActionPreview | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CopilotConversation {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  userId: string;
+  title: string;
+  status: "ACTIVE" | "ARCHIVED";
+  summary?: string | null;
+  contextMetadata?: Record<string, unknown>;
+  messageCount: number;
+  lastMessageAt: string;
+  workspace?: CopilotWorkspace;
+  messages?: CopilotMessage[];
+  actionPreviews?: CopilotActionPreview[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CopilotDashboardStats {
+  activeConversations: number;
+  totalMessages: number;
+  totalRequests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  pendingActions: number;
+  executedActions: number;
+  totalTokens: number;
+  estimatedCost: number;
+  mostUsedWorkspaces: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    icon: string;
+    conversationsCount: number;
+  }>;
+  generatedAt: string;
+}
+
+export const copilotApi = {
+  // Workspaces
+  listWorkspaces: () => apiClient.get<{ success: boolean; data: CopilotWorkspace[] }>("/copilot/workspaces"),
+  getWorkspace: (id: string) => apiClient.get<{ success: boolean; data: CopilotWorkspace }>(`/copilot/workspaces/${id}`),
+  createWorkspace: (payload: Partial<CopilotWorkspace>) =>
+    apiClient.post<{ success: boolean; data: CopilotWorkspace }>("/copilot/workspaces", payload),
+
+  // Conversations
+  listConversations: (params: { workspaceId?: string; status?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.workspaceId) query.set("workspaceId", params.workspaceId);
+    if (params.status) query.set("status", params.status);
+    if (params.search) query.set("search", params.search);
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    return apiClient.get<{ success: boolean; conversations: CopilotConversation[]; total: number; limit: number; offset: number }>(
+      `/copilot/conversations${query.toString() ? `?${query.toString()}` : ""}`
+    );
+  },
+  getConversation: (id: string) => apiClient.get<{ success: boolean; data: CopilotConversation }>(`/copilot/conversations/${id}`),
+  createConversation: (payload: { workspaceId?: string; title?: string; contextMetadata?: Record<string, unknown> }) =>
+    apiClient.post<{ success: boolean; data: CopilotConversation }>("/copilot/conversations", payload),
+  archiveConversation: (id: string) => apiClient.post<{ success: boolean; data: CopilotConversation }>(`/copilot/conversations/${id}/archive`, {}),
+  deleteConversation: (id: string) => apiClient.delete<{ success: boolean; id: string }>(`/copilot/conversations/${id}`),
+
+  // Messaging
+  sendMessage: (payload: {
+    conversationId?: string;
+    workspaceId?: string;
+    content: string;
+    mode?: string;
+    contextMetadata?: Record<string, unknown>;
+  }) => apiClient.post<{
+    success: boolean;
+    data: {
+      conversationId: string;
+      userMessage: CopilotMessage;
+      assistantMessage: CopilotMessage;
+      actionPreview?: CopilotActionPreview | null;
+      citations: CopilotCitation[];
+      toolResults: Array<{ tool: string; result: unknown }>;
+      correlationId: string;
+    };
+  }>("/copilot/messages", payload),
+
+  // Actions
+  confirmAction: (previewId: string) =>
+    apiClient.post<{ success: boolean; data: { success: boolean; preview: CopilotActionPreview; result: unknown } }>(
+      `/copilot/actions/${previewId}/confirm`,
+      {}
+    ),
+  rejectAction: (previewId: string) =>
+    apiClient.post<{ success: boolean; data: { success: boolean; preview: CopilotActionPreview } }>(
+      `/copilot/actions/${previewId}/reject`,
+      {}
+    ),
+
+  // Dashboard
+  getDashboard: () => apiClient.get<{ success: boolean; data: CopilotDashboardStats }>("/copilot/dashboard"),
+};
+
+

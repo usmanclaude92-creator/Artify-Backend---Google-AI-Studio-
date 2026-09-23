@@ -29,10 +29,14 @@ export const updateAiProviderSchema = createAiProviderSchema.partial();
 
 export const createAiModelSchema = z.object({
   providerId: z.string().min(1),
-  modelName: z.string().min(1).max(100),
-  displayName: z.string().min(1).max(100),
-  modelType: z.enum(["CHAT", "COMPLETION", "EMBEDDING", "MULTIMODAL"]).default("CHAT"),
-  contextLimit: z.number().int().min(1).default(128000),
+  modelName: z.string().min(1).max(100).optional(),
+  name: z.string().optional(),
+  displayName: z.string().min(1).max(100).optional(),
+  modelKey: z.string().optional(),
+  modelType: z.enum(["CHAT", "COMPLETION", "EMBEDDING", "MULTIMODAL"]).optional(),
+  type: z.enum(["CHAT", "COMPLETION", "EMBEDDING", "MULTIMODAL"]).optional(),
+  contextLimit: z.number().int().min(1).optional(),
+  contextWindow: z.number().int().min(1).optional(),
   inputCapabilities: z.array(z.string()).default(["TEXT"]),
   outputCapabilities: z.array(z.string()).default(["TEXT"]),
   supportsTools: z.boolean().default(true),
@@ -40,8 +44,11 @@ export const createAiModelSchema = z.object({
   supportsEmbedding: z.boolean().default(false),
   status: z.enum(["ACTIVE", "DEPRECATED", "DISABLED"]).default("ACTIVE"),
   isDefault: z.boolean().default(false),
+  maxTokens: z.number().int().optional(),
+  costPer1kInputTokens: z.number().optional(),
+  costPer1kOutputTokens: z.number().optional(),
   configMetadata: z.record(z.unknown()).default({}),
-});
+}).passthrough();
 
 export const updateAiModelSchema = createAiModelSchema.partial();
 
@@ -101,7 +108,8 @@ export const createAiWorkflowSchema = z.object({
 export const updateAiWorkflowSchema = createAiWorkflowSchema.partial();
 
 export const executePromptSchema = z.object({
-  prompt: z.string().min(1),
+  prompt: z.string().optional(),
+  promptId: z.string().optional(),
   capability: z.string().optional(),
   agentId: z.string().optional(),
   modelId: z.string().optional(),
@@ -111,6 +119,17 @@ export const executePromptSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(1).max(16384).optional(),
 });
+
+export const executeSandboxSchema = z.object({
+  template: z.string().optional(),
+  prompt: z.string().optional(),
+  variables: z.record(z.any()).optional(),
+  modelId: z.string().optional(),
+  providerId: z.string().optional(),
+  temperature: z.number().optional(),
+  systemPrompt: z.string().optional(),
+  systemInstruction: z.string().optional(),
+}).passthrough();
 
 export const executeWorkflowSchema = z.object({
   input: z.record(z.unknown()).default({}),

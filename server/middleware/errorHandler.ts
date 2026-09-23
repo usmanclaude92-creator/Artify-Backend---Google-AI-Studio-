@@ -35,7 +35,7 @@ export function errorHandlerMiddleware(err: unknown, req: Request, res: Response
   if (appError.statusCode >= 500) {
     log.error({ err, event: "app_error" }, appError.message);
   } else {
-    log.warn({ event: "app_error", code: appError.code }, appError.message);
+    log.warn({ event: "app_error", code: appError.code, details: appError.details }, appError.message);
   }
 
   const exposeDetails = appError.statusCode < 500; // client-caused errors may echo validation details

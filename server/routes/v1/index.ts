@@ -49,6 +49,9 @@ import paymentRoutes from "./paymentRoutes";
 import portalRoutes from "./portalRoutes";
 import publicRoutes from "./publicRoutes";
 import aiRoutes from "./aiRoutes";
+import { automationRoutes } from "./automationRoutes";
+import { knowledgeRoutes } from "./knowledgeRoutes";
+import copilotRoutes from "./copilotRoutes";
 
 const v1Router = Router();
 
@@ -83,5 +86,8 @@ v1Router.use("/payments", paymentRoutes);
 v1Router.use("/portal", portalRoutes);
 v1Router.use("/public", publicRoutes);
 v1Router.use("/ai", aiRoutes);
+v1Router.use("/automation", automationRoutes);
+v1Router.use("/knowledge", knowledgeRoutes);
+v1Router.use("/copilot", copilotRoutes);
 
 export default v1Router;

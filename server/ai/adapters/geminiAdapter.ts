@@ -82,4 +82,24 @@ export class GeminiAdapter implements AiModelAdapter {
       throw new InfrastructureError(`Failed to parse structured JSON output: ${res.text.slice(0, 100)}...`);
     }
   }
+
+  public async generateEmbedding(params: { text: string; modelName?: string; dimension?: number }): Promise<number[]> {
+    const client = this.getClient();
+    const model = params.modelName || "text-embedding-004";
+    try {
+      const response = await client.models.embedContent({
+        model,
+        contents: params.text,
+      });
+      const values = response.embedding?.values;
+      if (Array.isArray(values) && values.length > 0) {
+        return values;
+      }
+      throw new Error("No embedding values returned from Gemini model.");
+    } catch (err) {
+      logger.error({ err, model }, "Gemini embedding invocation failed");
+      const message = err instanceof Error ? err.message : "Gemini embedContent failed.";
+      throw new InfrastructureError(`Gemini embedding error: ${message}`);
+    }
+  }
 }

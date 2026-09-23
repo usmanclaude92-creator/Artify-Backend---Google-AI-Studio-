@@ -9,11 +9,14 @@ import { aiToolExecutor } from "../../ai/tools";
 import { auditLogRepository } from "../../repositories/auditLogRepository";
 import { logger } from "../../core/logger";
 import { ValidationError } from "../../core/errors";
+import { KnowledgeService } from "../knowledge/KnowledgeService";
+import type { KnowledgeCitation } from "../knowledge/types";
 
 export interface ExecutePromptRequest {
   organizationId: string;
   userId: string;
   userPermissions: readonly string[];
+  roleName?: string;
   prompt: string;
   capability?: string;
   providerId?: string;
@@ -24,6 +27,11 @@ export interface ExecutePromptRequest {
   variables?: Record<string, string>;
   temperature?: number;
   maxTokens?: number;
+  useKnowledgeBase?: boolean;
+  knowledgeFilter?: {
+    collectionIds?: string[];
+    sourceIds?: string[];
+  };
 }
 
 export interface ExecutionResponse {
@@ -38,6 +46,14 @@ export interface ExecutionResponse {
   estimatedCost: number;
   approvalId?: string;
   requiresApproval?: boolean;
+  citations?: KnowledgeCitation[];
+  tokenUsage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
 }
 
 export class AiOrchestrator {
@@ -105,6 +121,35 @@ export class AiOrchestrator {
     let finalSystemInstruction = req.systemInstruction;
     if (agent?.systemInstructions) {
       finalSystemInstruction = agent.systemInstructions + (req.systemInstruction ? `\n\n${req.systemInstruction}` : "");
+    }
+
+    // Phase 14: Enterprise Grounding & Permission-Aware RAG Context Augmentation
+    let knowledgeCitations: KnowledgeCitation[] | undefined = undefined;
+    const shouldQueryKnowledge = req.useKnowledgeBase || (agent?.knowledgeSources && Array.isArray(agent.knowledgeSources) && agent.knowledgeSources.length > 0);
+
+    if (shouldQueryKnowledge) {
+      try {
+        const groundedResult = await KnowledgeService.getGroundedContext(
+          finalPrompt,
+          {
+            organizationId: req.organizationId,
+            userId: req.userId,
+            userPermissions: req.userPermissions as string[],
+            roleName: req.roleName,
+          },
+          {
+            maxTokens: 2000,
+            filter: req.knowledgeFilter,
+          }
+        );
+
+        if (groundedResult.formattedContext) {
+          finalPrompt = `${groundedResult.formattedContext}\n\nUser Question/Task:\n${finalPrompt}`;
+          knowledgeCitations = groundedResult.citations;
+        }
+      } catch (kErr) {
+        logger.warn({ kErr }, "[AiOrchestrator] Knowledge context retrieval non-fatal error");
+      }
     }
 
     // 4. Create in-flight execution record
@@ -222,6 +267,14 @@ export class AiOrchestrator {
         totalTokens: callResult.totalTokens,
         durationMs,
         estimatedCost,
+        citations: knowledgeCitations,
+        tokenUsage: {
+          promptTokens: callResult.inputTokens,
+          completionTokens: callResult.outputTokens,
+          inputTokens: callResult.inputTokens,
+          outputTokens: callResult.outputTokens,
+          totalTokens: callResult.totalTokens,
+        },
       };
     } catch (err: unknown) {
       const durationMs = Date.now() - startTime;

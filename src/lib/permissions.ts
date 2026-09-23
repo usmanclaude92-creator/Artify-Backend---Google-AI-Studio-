@@ -63,7 +63,8 @@ import { InvoicesPage } from "../components/modules/InvoicesPage";
 import { PaymentsPage } from "../components/modules/PaymentsPage";
 import { ClientPortalPage } from "../components/modules/ClientPortalPage";
 import { AiControlCenterPage } from "../components/modules/AiControlCenterPage";
-import { Sparkles } from "lucide-react";
+import { AiCopilotPage } from "../components/modules/AiCopilotPage";
+import { Sparkles, Bot } from "lucide-react";
 
 export function hasPermission(permissions: readonly string[] | undefined, key: string): boolean {
   return !!permissions?.includes(key);
@@ -97,6 +98,15 @@ export const NAV_ITEMS: NavItem[] = [
     icon: Sparkles,
     requiresAnyPermission: ["ai.read"],
     component: AiControlCenterPage,
+    section: "AI Control Center",
+  },
+  {
+    id: "ai-copilot",
+    label: "AI Copilot",
+    path: "/copilot",
+    icon: Bot,
+    requiresAnyPermission: ["copilot.read", "copilot.use"],
+    component: AiCopilotPage,
     section: "AI Control Center",
   },
   {

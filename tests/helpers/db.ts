@@ -84,6 +84,35 @@ export async function resetDb(): Promise<void> {
   await prisma.category.deleteMany();
   await prisma.tag.deleteMany();
 
+  // Phase 13 — Autonomous AI Workflows & Business Automation
+  await prisma.automationNotification.deleteMany();
+  await prisma.automationActionExecution.deleteMany();
+  await prisma.automationTask.deleteMany();
+  await prisma.automationApproval.deleteMany();
+  await prisma.automationStepExecution.deleteMany();
+  await prisma.automationExecution.deleteMany();
+  await prisma.automationSchedule.deleteMany();
+  await prisma.automationEvent.deleteMany();
+  await prisma.automationWorkflowVersion.deleteMany();
+  await prisma.automationWorkflow.deleteMany();
+
+  // Phase 14 — Enterprise Knowledge, Document Intelligence & RAG
+  await prisma.knowledgeSearchLog.deleteMany();
+  await prisma.knowledgeEmbedding.deleteMany();
+  await prisma.knowledgeChunk.deleteMany();
+  await prisma.knowledgeIngestionJob.deleteMany();
+  await prisma.knowledgeDocumentVersion.deleteMany();
+  await prisma.knowledgeDocument.deleteMany();
+  await prisma.knowledgeSource.deleteMany();
+  await prisma.knowledgeCollection.deleteMany();
+
+  // Phase 15 — AI Copilot & Conversational Workspace
+  await (prisma as any).copilotUsage?.deleteMany?.();
+  await (prisma as any).copilotActionPreview?.deleteMany?.();
+  await (prisma as any).copilotMessage?.deleteMany?.();
+  await (prisma as any).copilotConversation?.deleteMany?.();
+  await (prisma as any).copilotWorkspace?.deleteMany?.();
+
   await prisma.aiExecution.deleteMany();
   await prisma.aiApproval.deleteMany();
   await prisma.aiWorkflow.deleteMany();

@@ -35,7 +35,9 @@ import { useAuth } from "../../context/AuthContext";
 import { useToast } from "../../context/ToastContext";
 import {
   aiApi,
+  copilotApi,
   type AiDashboardStats,
+  type CopilotDashboardStats,
   type AiProvider,
   type AiModel,
   type AiAgent,
@@ -49,7 +51,7 @@ import {
 import { Card, Button, Input, Select, Badge, LoadingState, ErrorState, EmptyState, Modal, Field } from "../ui/ui";
 import { hasPermission } from "../../lib/permissions";
 
-type TabKey = "overview" | "providers" | "agents" | "prompts" | "tools" | "workflows" | "approvals" | "executions";
+type TabKey = "overview" | "copilot" | "providers" | "agents" | "prompts" | "tools" | "workflows" | "approvals" | "executions";
 
 export const AiControlCenterPage: React.FC = () => {
   const { user } = useAuth();
@@ -75,6 +77,7 @@ export const AiControlCenterPage: React.FC = () => {
   const [workflows, setWorkflows] = useState<AiWorkflow[]>([]);
   const [approvals, setApprovals] = useState<AiApproval[]>([]);
   const [executions, setExecutions] = useState<AiExecution[]>([]);
+  const [copilotStats, setCopilotStats] = useState<CopilotDashboardStats | null>(null);
 
   // Search & Filters
   const [searchFilter, setSearchFilter] = useState("");
@@ -135,6 +138,7 @@ export const AiControlCenterPage: React.FC = () => {
         aiApi.listWorkflows({ limit: 50 }),
         aiApi.listApprovals({ limit: 50 }),
         aiApi.listExecutions({ limit: 50 }),
+        copilotApi.getDashboard().catch(() => ({ data: null })),
       ]);
 
       setStats(statsRes.stats);
@@ -147,6 +151,9 @@ export const AiControlCenterPage: React.FC = () => {
       setWorkflows(wfRes.items);
       setApprovals(appRes.items);
       setExecutions(execRes.items);
+      if (copilotRes && (copilotRes as any).data) {
+        setCopilotStats((copilotRes as any).data);
+      }
 
       if (!sandboxAgentId && agentRes.items.length > 0) {
         setSandboxAgentId(agentRes.items[0].id);
@@ -304,6 +311,15 @@ export const AiControlCenterPage: React.FC = () => {
         >
           <Activity className="w-3.5 h-3.5" />
           Overview & Telemetry
+        </button>
+        <button
+          onClick={() => setActiveTab("copilot")}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-2 transition whitespace-nowrap ${
+            activeTab === "copilot" ? "border-indigo-600 text-indigo-600 font-bold" : "border-transparent text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Copilot Workspace ({copilotStats?.activeConversations ?? 0})
         </button>
         <button
           onClick={() => setActiveTab("providers")}
@@ -556,6 +572,117 @@ export const AiControlCenterPage: React.FC = () => {
               </div>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* TAB: COPILOT WORKSPACE MANAGEMENT & ANALYTICS */}
+      {/* ------------------------------------------------------------------- */}
+      {activeTab === "copilot" && (
+        <div className="space-y-6">
+          {/* KPI Summary */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Card className="p-4">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Active Conversations</span>
+                <MessageSquare className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-bold mt-2" style={{ color: "var(--text-primary)" }}>
+                {copilotStats?.activeConversations ?? 0}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {copilotStats?.totalMessages ?? 0} total messages
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Copilot Requests</span>
+                <Bot className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-bold mt-2" style={{ color: "var(--text-primary)" }}>
+                {copilotStats?.totalRequests ?? 0}
+              </div>
+              <div className="text-[11px] text-emerald-600 mt-1">
+                {copilotStats?.successfulRequests ?? 0} completed successfully
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Pending Action Approvals</span>
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+              </div>
+              <div className="text-2xl font-bold mt-2 text-amber-600">
+                {copilotStats?.pendingActions ?? 0}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {copilotStats?.executedActions ?? 0} actions executed
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Tokens & Cost</span>
+                <Coins className="w-4 h-4 text-violet-600" />
+              </div>
+              <div className="text-2xl font-bold mt-2" style={{ color: "var(--text-primary)" }}>
+                {copilotStats?.totalTokens ? `${(copilotStats.totalTokens / 1000).toFixed(1)}k` : "0k"}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                Est. ${copilotStats?.estimatedCost?.toFixed(4) ?? "0.0000"} USD
+              </div>
+            </Card>
+          </div>
+
+          {/* Workspaces & Quick Launch */}
+          <Card className="p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
+                  Enterprise Copilot Workspaces
+                </h2>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Domain-specific AI copilots with RBAC scoping, grounding rules, and tool access limits.
+                </p>
+              </div>
+              <a
+                href="/copilot"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition"
+              >
+                <span>Launch Copilot Workspace</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+              {copilotStats?.mostUsedWorkspaces?.map((ws) => (
+                <div
+                  key={ws.id}
+                  className="p-3.5 rounded-xl border flex items-center justify-between transition hover:border-indigo-300 dark:hover:border-indigo-800"
+                  style={{ borderColor: "var(--border)", background: "var(--bg-card)" }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600">
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        {ws.name}
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-mono">/{ws.slug}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs font-bold text-indigo-600">
+                      {ws.conversationsCount}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block">chats</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
         </div>
       )}
 

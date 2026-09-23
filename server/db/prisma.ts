@@ -62,8 +62,9 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
     "product_modules.create", "product_modules.update", "product_modules.archive", "product_modules.reorder",
     "content.read", "content.create", "content.update", "content.publish", "content.delete", "authors.read",
     "authors.create", "authors.update", "media.read", "media.upload", "media.update", "media.delete",
-    "reports.read", "reports.export", "settings.read", "settings.manage", "audit.read", "ai.use", "ai.manage",
+    "reports.read", "reports.export", "settings.read", "settings.manage", "audit.read", "ai.read", "ai.use", "ai.manage", "ai.approve", "ai.admin",
     "automation.read", "automation.create", "automation.edit", "automation.publish", "automation.execute", "automation.approve", "automation.manage",
+    "knowledge.read", "knowledge.search", "knowledge.create", "knowledge.upload", "knowledge.edit", "knowledge.archive", "knowledge.reindex", "knowledge.manage",
     "onboarding.read", "onboarding.create", "onboarding.update", "onboarding.complete", "workspaces.read",
     "workspaces.create", "workspaces.update", "workspaces.suspend", "invitations.read", "invitations.create",
     "invitations.revoke", "contracts.read", "contracts.create", "contracts.update", "contracts.activate",
@@ -78,8 +79,9 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
     "leads.update", "leads.convert", "contacts.read", "contacts.create", "contacts.update", "products.read",
     "products.create", "products.update", "product_modules.read", "product_modules.create", "product_modules.update",
     "product_modules.reorder", "content.read", "content.create", "content.update", "authors.read", "authors.update",
-    "media.read", "media.upload", "media.update", "reports.read", "ai.use",
+    "media.read", "media.upload", "media.update", "reports.read", "ai.read", "ai.use", "ai.approve",
     "automation.read", "automation.execute", "automation.approve",
+    "knowledge.read", "knowledge.search", "knowledge.create", "knowledge.upload", "knowledge.edit", "knowledge.reindex",
     "onboarding.read", "onboarding.create",
     "onboarding.update", "workspaces.read", "workspaces.create", "workspaces.update", "invitations.read", "invitations.create",
     "contracts.read", "contracts.create", "contracts.update", "subscriptions.read", "subscriptions.create",
@@ -90,7 +92,8 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
   USER: [
     "clients.read", "leads.read", "leads.create", "leads.update", "contacts.read", "products.read",
     "product_modules.read", "content.read", "content.create", "authors.read", "media.read", "media.upload",
-    "reports.read", "ai.use", "automation.read", "automation.execute",
+    "reports.read", "ai.read", "ai.use", "automation.read", "automation.execute",
+    "knowledge.read", "knowledge.search",
     "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
     "subscriptions.read", "invoices.read", "payments.read", "portal.dashboard.read", "portal.contracts.read",
     "portal.subscriptions.read", "portal.invoices.read", "portal.payments.read"
@@ -98,7 +101,8 @@ const ROLE_PERMISSION_SETS: Record<RoleKey, readonly string[] | "*"> = {
   VIEWER: [
     "users.read", "organizations.read", "roles.read", "clients.read", "leads.read", "contacts.read",
     "products.read", "product_modules.read", "content.read", "authors.read", "media.read", "reports.read",
-    "settings.read", "audit.read", "automation.read",
+    "settings.read", "audit.read", "ai.read", "automation.read",
+    "knowledge.read", "knowledge.search",
     "onboarding.read", "workspaces.read", "invitations.read", "contracts.read",
     "subscriptions.read", "invoices.read", "payments.read", "portal.dashboard.read", "portal.contracts.read",
     "portal.subscriptions.read", "portal.invoices.read", "portal.payments.read"
@@ -724,7 +728,11 @@ function applyIncludes(modelName: string, item: any, include?: any): any {
     } else if (relKey === "agent") {
       cloned.agent = item.agentId ? getStore("aiagent").get(item.agentId) ?? null : null;
     } else if (relKey === "workflow") {
-      cloned.workflow = item.workflowId ? getStore("aiworkflow").get(item.workflowId) ?? null : null;
+      if (lower.startsWith("automation")) {
+        cloned.workflow = item.workflowId ? getStore("automationworkflow").get(item.workflowId) ?? null : null;
+      } else {
+        cloned.workflow = item.workflowId ? getStore("aiworkflow").get(item.workflowId) ?? null : null;
+      }
     } else if (relKey === "createdBy") {
       cloned.createdBy = item.createdById ? getStore("user").get(item.createdById) ?? null : null;
     } else if (relKey === "updatedBy") {
@@ -733,10 +741,60 @@ function applyIncludes(modelName: string, item: any, include?: any): any {
       cloned.approver = item.approverId ? getStore("user").get(item.approverId) ?? null : null;
     } else if (relKey === "models" && lower === "aiprovider") {
       cloned.models = Array.from(getStore("aimodel").values()).filter((m) => m.providerId === item.id);
+    } else if (relKey === "stepExecutions") {
+      cloned.stepExecutions = Array.from(getStore("automationstepexecution").values()).filter((s) => s.executionId === item.id);
+    } else if (relKey === "approvals") {
+      cloned.approvals = Array.from(getStore("automationapproval").values()).filter((a) => a.executionId === item.id);
+    } else if (relKey === "tasks") {
+      cloned.tasks = Array.from(getStore("automationtask").values()).filter((t) => t.sourceExecutionId === item.id);
+    } else if (relKey === "actionExecutions") {
+      cloned.actionExecutions = Array.from(getStore("automationactionexecution").values()).filter((ae) => ae.executionId === item.id);
+    } else if (relKey === "notifications") {
+      cloned.notifications = Array.from(getStore("automationnotification").values()).filter((n) => n.sourceExecutionId === item.id);
+    } else if (relKey === "schedules") {
+      cloned.schedules = Array.from(getStore("automationschedule").values()).filter((s) => s.workflowId === item.id);
+    } else if (relKey === "executions") {
+      cloned.executions = Array.from(getStore("automationexecution").values()).filter((e) => e.workflowId === item.id);
     } else if (relKey === "versions") {
-      const storeName = lower === "aiagent" ? "aiagentversion" : "aipromptversion";
-      const fk = lower === "aiagent" ? "agentId" : "promptId";
-      cloned.versions = Array.from(getStore(storeName).values()).filter((v) => v[fk] === item.id);
+      if (lower === "automationworkflow") {
+        cloned.versions = Array.from(getStore("automationworkflowversion").values()).filter((v) => v.workflowId === item.id);
+      } else if (lower === "knowledgedocument") {
+        cloned.versions = Array.from(getStore("knowledgedocumentversion").values()).filter((v) => v.documentId === item.id);
+      } else {
+        const storeName = lower === "aiagent" ? "aiagentversion" : "aipromptversion";
+        const fk = lower === "aiagent" ? "agentId" : "promptId";
+        cloned.versions = Array.from(getStore(storeName).values()).filter((v) => v[fk] === item.id);
+      }
+    } else if (relKey === "collection") {
+      cloned.collection = item.collectionId ? getStore("knowledgecollection").get(item.collectionId) ?? null : null;
+    } else if (relKey === "source") {
+      cloned.source = item.sourceId ? getStore("knowledgesource").get(item.sourceId) ?? null : null;
+    } else if (relKey === "document") {
+      cloned.document = item.documentId ? getStore("knowledgedocument").get(item.documentId) ?? null : null;
+    } else if (relKey === "documents") {
+      const fk = lower === "knowledgecollection" ? "collectionId" : "sourceId";
+      cloned.documents = Array.from(getStore("knowledgedocument").values()).filter((d) => d[fk] === item.id);
+    } else if (relKey === "chunks") {
+      const fk = lower === "knowledgedocumentversion" ? "versionId" : "documentId";
+      cloned.chunks = Array.from(getStore("knowledgechunk").values()).filter((c) => c[fk] === item.id);
+    } else if (relKey === "embeddings") {
+      cloned.embeddings = Array.from(getStore("knowledgeembedding").values()).filter((e) => e.chunkId === item.id);
+    } else if (relKey === "sources") {
+      cloned.sources = Array.from(getStore("knowledgesource").values()).filter((s) => s.collectionId === item.id);
+    } else if (relKey === "ingestionJobs") {
+      cloned.ingestionJobs = Array.from(getStore("knowledgeingestionjob").values()).filter((j) => j.documentId === item.id);
+    } else if (relKey === "workspace") {
+      cloned.workspace = item.workspaceId ? getStore("copilotworkspace").get(item.workspaceId) ?? null : null;
+    } else if (relKey === "conversation") {
+      cloned.conversation = item.conversationId ? getStore("copilotconversation").get(item.conversationId) ?? null : null;
+    } else if (relKey === "conversations") {
+      cloned.conversations = Array.from(getStore("copilotconversation").values()).filter((c) => c.workspaceId === item.id);
+    } else if (relKey === "messages") {
+      cloned.messages = Array.from(getStore("copilotmessage").values()).filter((m) => m.conversationId === item.id);
+    } else if (relKey === "actionPreviews") {
+      cloned.actionPreviews = Array.from(getStore("copilotactionpreview").values()).filter((a) => a.conversationId === item.id);
+    } else if (relKey === "confirmedBy") {
+      cloned.confirmedBy = item.confirmedById ? getStore("user").get(item.confirmedById) ?? null : null;
     }
   }
 
@@ -840,6 +898,34 @@ function createModelHandler(modelName: string) {
         defaults.status = "DRAFT";
         defaults.version = 1;
         defaults.trigger = "MANUAL";
+      } else if (lower === "copilotconversation") {
+        defaults.status = "ACTIVE";
+        defaults.messageCount = 0;
+      } else if (lower === "copilotmessage") {
+        defaults.status = "COMPLETED";
+        defaults.inputTokens = 0;
+        defaults.outputTokens = 0;
+        defaults.totalTokens = 0;
+        defaults.durationMs = 0;
+        defaults.estimatedCost = 0;
+      } else if (lower === "copilotactionpreview") {
+        defaults.status = "PENDING";
+        defaults.riskLevel = "HIGH";
+        defaults.requiresApproval = true;
+      } else if (lower === "copilotworkspace") {
+        defaults.isSystem = false;
+        defaults.isDefault = false;
+        defaults.temperature = 0.7;
+        defaults.maxTokens = 2048;
+        defaults.requireCitations = true;
+        defaults.defaultMode = "ANSWER";
+        defaults.allowedTools = [];
+        defaults.allowedModules = [];
+        defaults.requiredPermissions = [];
+      } else if (lower === "automationtask") {
+        defaults.status = "PENDING";
+        defaults.priority = "MEDIUM";
+        defaults.isAiGenerated = true;
       }
       const record = {
         ...defaults,
@@ -989,12 +1075,21 @@ function createModelHandler(modelName: string) {
 function isConnectionError(err: any): boolean {
   if (!err) return false;
   const msg = String(err.message || err);
+  const code = String(err.code || "");
   return (
     err.name === "PrismaClientInitializationError" ||
+    err.name === "PrismaClientKnownRequestError" ||
+    err.name === "PrismaClientRustPanicError" ||
+    code === "P1000" ||
+    code === "P1001" ||
+    code === "P1002" ||
+    code === "P1003" ||
+    code === "P1017" ||
     msg.includes("Can't reach database server") ||
     msg.includes("ECONNREFUSED") ||
     msg.includes("timed out") ||
-    msg.includes("database server is running")
+    msg.includes("database server is running") ||
+    msg.includes("Invalid `prisma.")
   );
 }
 

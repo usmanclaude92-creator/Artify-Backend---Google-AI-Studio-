@@ -40,4 +40,5 @@ export interface AiModelAdapter {
   readonly providerType: string;
   generateText(params: AiModelCallParams): Promise<AiModelCallResult>;
   generateStructured<T = unknown>(params: AiModelCallParams): Promise<T>;
+  generateEmbedding?(params: { text: string; modelName?: string; dimension?: number }): Promise<number[]>;
 }
